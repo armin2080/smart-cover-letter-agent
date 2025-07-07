@@ -1,0 +1,7 @@
+/.venv/
+/__pycache__/
+config.json
+jobs.db
+users.db
+user_jobs.db
+notebook.ipynb
