@@ -9,7 +9,8 @@ with open('config.json', 'r') as f:
 EMAIL_ACCOUNT = config['gmail']['email']
 PASSWORD = config['gmail']['password']
 
-email_list = ['express@jobagent.stepstone.de', 'info@jobagent.stepstone.de',]
+email_list = ['express@jobagent.stepstone.de', 'info@jobagent.stepstone.de',
+              'jobalerts-noreply@linkedin.com', 'jobs-listings@linkedin.com', 'jobs-noreply@linkedin.com']
 
 
 class GmailClient:
@@ -108,6 +109,9 @@ class GmailClient:
             except requests.exceptions.RequestException as e:
                 print(f"[ERROR] Exception occurred with '{deep_link}': {str(e)}")
             finally:
+                if penalty > 60:
+                    print(f"[ERROR] Too many retries for link '{deep_link}'. Skipping...")
+                    return None
                 print(f"[INFO] Retrying to resolve link '{deep_link}' after {penalty} seconds...")
                 time.sleep(penalty)
                 penalty *= 2
@@ -121,70 +125,98 @@ class GmailClient:
             for email in emails:
                 subject = email['subject']
                 e_id = email['id']
-                # stepstone recommendation:
 
-                # stepstone new job opportunityies for you:
-                if ('are looking for candidates' in subject) or ('New job opportunities for you' in subject):
-                    body = email['body']
-                    jobs = body.split('Perfect\xa0Match\xa0\xa0\nThis job suits you beautifully. Your CV fits perfectly.')[1:]
-                    for job in jobs:
-                        lines = job.strip().split('\n')
-                        if lines:
-                            title = lines[0].strip()
-                            # Try to find the first link in the job section
-                            match = re.search(r'(https?://[^\s\'"]+)', job)
-                            final_link = match.group(0) if match else None
-                            final_link = self.convert_stepstone_link(final_link) if final_link else None
+                # stepstone recommendation:
+                if 'stepstone' in email_addr:
+                    # stepstone new job opportunityies for you:
+                    if ('are looking for candidates' in subject) or ('New job opportunities for you' in subject):
+                        body = email['body']
+                        jobs = body.split('Perfect\xa0Match\xa0\xa0\nThis job suits you beautifully. Your CV fits perfectly.')[1:]
+                        for job in jobs:
+                            lines = job.strip().split('\n')
+                            if lines:
+                                title = lines[0].strip()
+                                # Try to find the first link in the job section
+                                match = re.search(r'(https?://[^\s\'"]+)', job)
+                                final_link = match.group(0) if match else None
+                                final_link = self.convert_stepstone_link(final_link) if final_link else None
+                                if final_link:
+                                    self.mail.store(e_id, '+FLAGS', '\\Seen')
+
+                            job_details.append({
+                            'title': title,
+                            'link': final_link,
+                            'from': email_addr,
+                            'subject': subject,
+                            })
+                        if len(job_details) > 0:
+                            continue
+                        
+                    
+                    
+                    else:
+                        if "Get it while it's hot" in subject:  
+                            title = subject.split('hot:')[1]
+                        
+                        elif 'Armin, our recommendation:' in subject:
+                            title = subject.split('Armin, our recommendation: ')[-1].strip()
+                        
+                        elif "You have good chance:" in subject:
+                            title = subject.split('You have good chance: ')[-1].strip()
+                        
+                        elif 'Start your application today:' in subject:
+                            title = subject.split('Start your application today: ')[-1].strip()
+                        
+                        elif 'You have the skills for this job:' in subject:
+                            title = subject.split('You have the skills for this job: ')[-1].strip()
+                        
+                        elif "You're wanted:" in subject:
+                            title = subject.split("You're wanted: ")[-1].strip()
+                        else:
+                            title = subject.split(': ')[-1].strip()
+        
+                        
+                        body = email['body']
+                        match = re.search(r'(https?://)?(click\.stepstone\.de[^\s\'"]+)', body)
+                        if match:
+                            # Ensure the link has the protocol
+                            link = match.group(0)
+                            if not link.startswith('http'):
+                                link = 'https://' + link
+                        else:
+                            link = None
+
+                        if link:
+                            final_link = self.convert_stepstone_link(link)
                             if final_link:
                                 self.mail.store(e_id, '+FLAGS', '\\Seen')
 
-                        job_details.append({
-                        'title': title,
-                        'link': final_link,
-                        'from': email_addr,
-                        'subject': subject,
-                        })
-                    if len(job_details) > 0:
-                        continue
-                    
-                
-                
-                else:
-                    if "Get it while it's hot" in subject:  
-                        title = subject.split('hot:')[1]
-                    
-                    elif 'Armin, our recommendation:' in subject:
-                        title = subject.split('Armin, our recommendation: ')[-1].strip()
-                    
-                    elif "You have good chance:" in subject:
-                        title = subject.split('You have good chance: ')[-1].strip()
-                    
-                    elif 'Start your application today:' in subject:
-                        title = subject.split('Start your application today: ')[-1].strip()
-                    
-                    elif 'You have the skills for this job:' in subject:
-                        title = subject.split('You have the skills for this job: ')[-1].strip()
-                    
-                    elif "You're wanted:" in subject:
-                        title = subject.split("You're wanted: ")[-1].strip()
-                    else:
-                        title = subject.split(': ')[-1].strip()
-    
-                    
-                    body = email['body']
-                    match = re.search(r'(https?://)?(click\.stepstone\.de[^\s\'"]+)', body)
-                    if match:
-                        # Ensure the link has the protocol
-                        link = match.group(0)
-                        if not link.startswith('http'):
-                            link = 'https://' + link
-                    else:
-                        link = None
+                if 'linkedin' in email_addr:
+                    if 'new jobs for' in subject:
+                        body = email['body']
+                        lines = body.split('\n')
+                        body = '\n'.join(lines[3:]).strip()
+                        jobs = body.split('---------------------------------------------------------')[:-1]
+                        for job in jobs:
+                            if not job.strip():
+                                continue
+                            lines = job.strip().split('\n')
+                            if lines:
+                                title = lines[0].strip()
+                                match = re.search(r'(https?://[^\s\'"]+)', job)
+                                final_link = match.group(0) if match else None
+                                if final_link:
+                                    final_link = final_link.split('?')[0]
+                                    self.mail.store(e_id, '+FLAGS', '\\Seen')
 
-                    if link:
-                        final_link = self.convert_stepstone_link(link)
-                        if final_link:
-                            self.mail.store(e_id, '+FLAGS', '\\Seen')
+                            job_details.append({
+                            'title': title,
+                            'link': final_link,
+                            'from': email_addr,
+                            'subject': subject,
+                            })
+                        if len(job_details) > 0:
+                            continue
 
                 
                 job_details.append({
