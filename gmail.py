@@ -20,6 +20,8 @@ class GmailClient:
         self.PASSWORD = PASSWORD
         self.mail = imaplib.IMAP4_SSL(self.IMAP_SERVER)
         self.email_list = email_list
+    
+    
     def get_email_body(self, msg):
         if msg.is_multipart():
             for part in msg.walk():
@@ -112,11 +114,12 @@ class GmailClient:
                 if penalty > 60:
                     print(f"[ERROR] Too many retries for link '{deep_link}'. Skipping...")
                     return None
+                # Exponential backoff for retries
                 print(f"[INFO] Retrying to resolve link '{deep_link}' after {penalty} seconds...")
                 time.sleep(penalty)
                 penalty *= 2
-        
 
+        
     def extract_job_details(self):
         jobs = self.filter_unread_emails()
         job_details = []
@@ -158,8 +161,8 @@ class GmailClient:
                         if "Get it while it's hot" in subject:  
                             title = subject.split('hot:')[1]
                         
-                        elif 'Armin, our recommendation:' in subject:
-                            title = subject.split('Armin, our recommendation: ')[-1].strip()
+                        elif 'our recommendation:' in subject:
+                            title = subject.split('our recommendation: ')[-1].strip()
                         
                         elif "You have good chance:" in subject:
                             title = subject.split('You have good chance: ')[-1].strip()
@@ -190,7 +193,8 @@ class GmailClient:
                             final_link = self.convert_stepstone_link(link)
                             if final_link:
                                 self.mail.store(e_id, '+FLAGS', '\\Seen')
-
+                
+                # linkedin recommendation:
                 if 'linkedin' in email_addr:
                     if 'new jobs for' in subject:
                         body = email['body']
@@ -206,7 +210,7 @@ class GmailClient:
                                 match = re.search(r'(https?://[^\s\'"]+)', job)
                                 final_link = match.group(0) if match else None
                                 if final_link:
-                                    final_link = final_link.split('?')[0]
+                                    final_link = final_link.split('?')[0].replace('/comm', '')
                                     self.mail.store(e_id, '+FLAGS', '\\Seen')
 
                             job_details.append({
