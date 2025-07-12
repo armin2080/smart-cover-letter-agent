@@ -67,7 +67,9 @@ To set up the Smart Cover Letter Agent on your local machine, follow these steps
     "gmail": {
         "email": "YOUR_EMAIL",
         "password": "YOUR_APP_PASSWORD"
-    }
+    },
+    "resume": "YOUR_RESUME_IN_TEXT_FORMAT"
+   }
     ```
 
 
