@@ -2,14 +2,7 @@ from bs4 import BeautifulSoup
 from bs4 import NavigableString, Tag
 import requests, json, re, time
 from database import SQLiteDB
-# url = "https://www.stellenwerk.de/dortmund/werkstudentin-datenauswertung-250528-245001"
-# response = requests.get(url)
-# response.raise_for_status()  # Raise an error for bad status codes
 
-# soup = BeautifulSoup(response.text, "html.parser")
-
-# with open("target.html", "w", encoding="utf-8") as f:
-#     f.write(soup.prettify())
 
 class Scraper:
     def __init__(self):
@@ -45,7 +38,7 @@ class Scraper:
 
     def scrape_stellenwerk(self):
 
-        # check portfolio website - irrelevant to the project:
+        # check portfolio website - irrelevant to the project. You can remove this part.:
         response = self.send_request('https://armin2080.pythonanywhere.com/')
 
         url = 'https://www.stellenwerk.de/dortmund?filters%5BemploymentMode%5D%5Bid%5D%5B%24in%5D%5B0%5D=8'
@@ -182,10 +175,6 @@ class Scraper:
 
 if __name__ == "__main__":
     scraper = Scraper()
-    url = 'https://www.linkedin.com/jobs/view/4235002735/'
-    soup = scraper.get_html(url)
-    job_details = scraper.extract_linkedin_details(soup)
-    print(job_details)
 
         
 
