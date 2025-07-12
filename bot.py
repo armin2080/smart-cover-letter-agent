@@ -1,9 +1,9 @@
 import json, os, logging, datetime, re, io, time
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters, ConversationHandler
-from scraper import Scraper  # Your function to scrape Stellenberg Dortmund
-from database import JobDatabase, UserDatabase # Your DB functions
-from agent import Agent  # Your agent class for handling job data
+from scraper import Scraper 
+from database import JobDatabase, UserDatabase
+from agent import Agent 
 from gmail import GmailClient
 from reportlab.pdfgen import canvas
 from reportlab.pdfbase.pdfmetrics import stringWidth
@@ -29,8 +29,6 @@ agent = Agent()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Check whether the bot is running
-run = False
 
 # Define conversation states
 PDF_TEXT = range(1)
@@ -135,106 +133,6 @@ async def get_graduation_date(update: Update, context: ContextTypes.DEFAULT_TYPE
   return ConversationHandler.END
 
 
-
-
-# --- /edit COMMAND HANDLER ---
-async def edit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    username = update.effective_user.username
-    user = user_db.get_user(username)
-    
-    if not user:
-        await update.message.reply_text("You are not registered yet. Please use /start to register first.")
-        return ConversationHandler.END
-
-    keyboard = [
-        [InlineKeyboardButton("Resume", callback_data="edit_resume")],
-        [InlineKeyboardButton("Expected Salary", callback_data="edit_salary")],
-        [InlineKeyboardButton("Graduation Date", callback_data="edit_graduation")],
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(
-        "Which information would you like to edit?",
-        reply_markup=reply_markup
-    )
-    return "EDIT_CHOICE"
-
-# --- CALLBACK FOR EDIT BUTTON PRESS ---
-async def edit_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    
-    choice = query.data  # Get the callback data to determine which button was pressed
-
-    if choice == "edit_resume":
-        await query.edit_message_text("Please send your new resume in text format.")
-        return "EDIT_RESUME"  # Transition to editing resume state
-    elif choice == "edit_salary":
-        await query.edit_message_text("Please enter your new expected salary per hour (in EUR).")
-        return "EDIT_SALARY"  # Transition to editing salary state
-    elif choice == "edit_graduation":
-        await query.edit_message_text("Please enter your new graduation date (Format: YYYY.MM.DD).")
-        return "EDIT_GRADUATION"  # Transition to editing graduation date state
-    else:
-        await query.edit_message_text("Invalid choice. Please try again.")
-        return ConversationHandler.END  # End conversation on invalid choice
-
-# --- RESUME EDITING HANDLER ---
-async def edit_resume_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    resume_text = update.message.text
-    if not resume_text or len(resume_text) < 20:
-        await update.message.reply_text("Please send a valid resume text (at least 20 characters).")
-        return "EDIT_RESUME"  # Stay in this state until valid input is received
-    
-    username = update.effective_user.username
-    user_db.update_user(username, resume=resume_text)
-    
-    await update.message.reply_text("Your resume has been updated.")
-    
-    return ConversationHandler.END  # End conversation after successful editing
-
-# --- SALARY EDITING HANDLER ---
-async def edit_salary_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    salary_text = update.message.text
-    try:
-        salary = int(salary_text.replace(",", "").replace(".", "").strip())
-        
-        if salary <= 0:
-            raise ValueError("Salary must be a positive number.")
-        
-        username = update.effective_user.username
-        user_db.update_user(username, salary)
-        
-        await update.message.reply_text("Your expected salary has been updated.")
-        
-        return ConversationHandler.END  # End conversation after successful editing
-        
-    except ValueError as e:
-        await update.message.reply_text(f"Please enter a valid number for your expected salary (e.g., 15). Error: {str(e)}")
-        
-    # Stay in this state until valid input is received  
-    return "EDIT_SALARY"
-
-# --- GRADUATION DATE EDITING HANDLER ---
-async def edit_graduation_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-   date_text = update.message.text
-   
-   try:
-       grad_date = datetime.datetime.strptime(date_text.strip(), "%Y.%m.%d").date()
-       
-       username = update.effective_user.username
-       user_db.update_user(username, str(grad_date))
-       
-       await update.message.reply_text("Your graduation date has been updated.")
-       
-       return ConversationHandler.END  # End conversation after successful editing
-      
-   except ValueError:
-       await update.message.reply_text("Please enter the date in the format YYYY.MM.DD (e.g., 2026.07.01).")
-       
-   # Stay in this state until valid input is received  
-   return "EDIT_GRADUATION"
-
-
 # --- /info COMMAND HANDLER ---
 async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     username = update.effective_user.username
@@ -265,8 +163,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(help_text)
 
-# --- SCHEDULED JOB FUNCTION ---
-async def scheduled_scrape(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# --- SCRAPE JOB FUNCTION ---
+async def scrape_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     scrape = scraper.scrape_stellenwerk()
     email_checker = GmailClient(config['gmail']['email'], config['gmail']['password'])
     email_checker.extract_job_details()
@@ -296,7 +194,7 @@ async def job_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.answer()
 
     job_id = query.data
-    job = job_db.get_job_by_id(job_id)  # This should return a dict with 'link' key
+    job = job_db.get_job_by_id(job_id)
     job_db.mark_job_as_checked(job_id)
 
     await query.edit_message_text(text=f"Here is the job link:\n{job[2]}")
@@ -312,8 +210,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
   else:
 
-    scraper = Scraper()
-    agent = Agent()
     if 'stellenwerk.de' in match.group(0):
       soup = scraper.get_html(match.group(0))
       job_details = scraper.extract_stellenwerk_details(soup)
@@ -447,11 +343,10 @@ def main():
   application.add_handler(CommandHandler('unchecked', unchecked_handler))
   application.add_handler(CommandHandler('help', help_command))
   application.add_handler(CommandHandler('info', info_command))
-  application.add_handler(CommandHandler('scrape', scheduled_scrape))
+  application.add_handler(CommandHandler('scrape', scrape_handler))
   application.add_handler(MessageHandler(filters.TEXT & filters.Entity("url"), handle_message))
   
 
-  application.add_handler(CallbackQueryHandler(edit_button_handler, pattern='^edit_'))
   application.add_handler(CallbackQueryHandler(job_button_handler))
   
   
