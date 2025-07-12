@@ -1,0 +1,11 @@
+python-telegram-bot
+bs4
+requests
+logging
+reportlab
+json
+email
+re
+time
+imaplib
+sqlite3
