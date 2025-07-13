@@ -63,7 +63,7 @@ To set up the Smart Cover Letter Agent on your local machine, follow these steps
    {
     "api_key": "YOUR_AGENT_API_KEY",
     "bot_token": "YOUR_BOT_TOKEN",
-    "user_id": YOUR_TELEGRAM_USER_ID,
+    "user_id": "YOUR_TELEGRAM_USER_ID",
     "gmail": {
         "email": "YOUR_EMAIL",
         "password": "YOUR_APP_PASSWORD"
