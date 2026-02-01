@@ -14,7 +14,9 @@ email_list = ['express@jobagent.stepstone.de', 'info@jobagent.stepstone.de',
 
 
 class GmailClient:
-    def __init__(self,EMAIL_ACCOUNT, PASSWORD, email_list=email_list):
+    """Client for monitoring Gmail inbox and extracting job details from email alerts."""
+    
+    def __init__(self, EMAIL_ACCOUNT, PASSWORD, email_list=email_list):
         self.IMAP_SERVER = "imap.gmail.com" 
         self.EMAIL_ACCOUNT = EMAIL_ACCOUNT
         self.PASSWORD = PASSWORD
@@ -23,6 +25,14 @@ class GmailClient:
     
     
     def get_email_body(self, msg):
+        """Extract plain text body from email message.
+        
+        Args:
+            msg: Email message object.
+            
+        Returns:
+            str: Email body as plain text.
+        """
         if msg.is_multipart():
             for part in msg.walk():
                 content_type = part.get_content_type()
@@ -84,14 +94,13 @@ class GmailClient:
                     filtered_emails[sender].append(email_data)
         return filtered_emails
     
-    def convert_stepstone_link(self, deep_link):
+    def convert_stepstone_link(self, deep_link, max_retries=4):
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"  # helps avoid blocks
         }
         penalty = 5
-        while True:
-                
-
+        retries = 0
+        while retries < max_retries:
             try:
                 # Follow redirects to get the final destination link
                 response = requests.get(deep_link, allow_redirects=True, headers=headers, timeout=10)
@@ -110,17 +119,24 @@ class GmailClient:
 
             except requests.exceptions.RequestException as e:
                 print(f"[ERROR] Exception occurred with '{deep_link}': {str(e)}")
-            finally:
-                if penalty > 60:
-                    print(f"[ERROR] Too many retries for link '{deep_link}'. Skipping...")
-                    return None
+            
+            retries += 1
+            if retries < max_retries:
                 # Exponential backoff for retries
-                print(f"[INFO] Retrying to resolve link '{deep_link}' after {penalty} seconds...")
+                print(f"[INFO] Retrying to resolve link '{deep_link}' after {penalty} seconds... (Attempt {retries}/{max_retries})")
                 time.sleep(penalty)
                 penalty *= 2
+        
+        print(f"[ERROR] Max retries reached for link '{deep_link}'. Skipping...")
+        return None
 
         
     def extract_job_details(self):
+        """Extract job details from unread emails and save to database.
+        
+        Returns:
+            bool: True if extraction was successful.
+        """
         jobs = self.filter_unread_emails()
         job_details = []
         for email_addr, emails in jobs.items():
@@ -128,6 +144,8 @@ class GmailClient:
             for email in emails:
                 subject = email['subject']
                 e_id = email['id']
+                title = None
+                final_link = None
 
                 # stepstone recommendation:
                 if 'stepstone' in email_addr:
@@ -222,14 +240,41 @@ class GmailClient:
                         if len(job_details) > 0:
                             continue
 
-                
-                job_details.append({
-                    'title': title,
-                    'link': final_link,
-                    'from': email_addr,
-                    'subject': subject,
-                })
+                    elif 'is hiring' in subject:
+                        body = email['body']
+                        lines = body.split('\n')
+                        body = '\n'.join(lines[3:]).strip()
+                        jobs = body.split('---------------------------------------------------------')
+                        for job in jobs:
+                            if not job.strip():
+                                continue
+                            lines = job.strip().split('\n')
+                            if lines:
+                                title = lines[0].strip()
+                                if 'See all jobs on LinkedIn:' in title:
+                                    break
+                                match = re.search(r'(https?://[^\s\'"]+)', job)
+                                final_link = match.group(0) if match else None
+                                if final_link:
+                                    final_link = final_link.split('?')[0].replace('/comm', '')
+                                    self.mail.store(e_id, '+FLAGS', '\\Seen')
+                            job_details.append({
+                                'title': title,
+                                'link': final_link,
+                                'from': email_addr,
+                                'subject': subject,
+                            })
 
+                # Only append if we successfully extracted both title and link
+                if title and final_link:
+                    job_details.append({
+                        'title': title,
+                        'link': final_link,
+                        'from': email_addr,
+                        'subject': subject,
+                    })
+                else:
+                    print(f"[WARNING] Could not extract complete job details from email ID {e_id}. Title: {title}, Link: {final_link}")
 
                 
         if job_details:
@@ -246,5 +291,7 @@ class GmailClient:
 
     
 if __name__ == "__main__":
-    agent = GmailClient(EMAIL_ACCOUNT, PASSWORD, email_list)
-    agent.extract_job_details()
+    # Test email monitoring
+    client = GmailClient(EMAIL_ACCOUNT, PASSWORD, email_list)
+    jobs = client.extract_job_details()
+    print(f"Successfully extracted job details: {jobs}")
