@@ -1,135 +1,162 @@
-
 # Smart Cover Letter Agent
 
-This project scrapes job listings daily from platforms like **Stellenwerk** and monitors emails from **LinkedIn** and **StepStone** to collect relevant job offers. It analyzes each job description alongside your personal resume and uses a language model to automatically generate tailored cover letters. Integrated with Telegram for easy interaction, it streamlines the entire job application process.
+An intelligent Telegram bot that automates job application assistance by monitoring job postings, scraping job details, and generating personalized cover letters using AI.
 
 ## Features
 
-- **Automated Job Scraping:** The agent scrapes job listings daily from stellenwerk.de and retrieves relevant emails from LinkedIn and StepStone.
-- **Telegram Bot Integration:** Users receive daily notifications of new job listings directly in their Telegram bot.
-- **AI-Powered Cover Letters:** The agent generates personalized cover letters by analyzing the job description and matching it with the user's resume.
-- **PDF Generation:** A clean PDF file of the generated cover letter is created and sent to the user.
-- **Dataset Management:** All scraped job offers are stored in a structured dataset for easy access and review.
-- **Future Scalability:** Plans to expand scraping capabilities to additional job offer websites such as Indeed.
-
-
-
-## Tech Stack
-
-- **Programming Language:**
-  - Python
-
-- **Web Scraping:**
-  - Beautiful Soup 4
-
-- **Email Handling:**
-  - IMAP library
-
-- **Database Management:**
-  - SQLite3
-
-- **Telegram Bot Integration:**
-  - python-telegram-bot
-
-- **PDF Generation:**
-  - ReportLab
-
+- 🤖 **AI-Powered Cover Letters**: Generates personalized cover letters using Google's Gemini 2.0 Flash model
+- 📧 **Email Monitoring**: Automatically monitors Gmail for job alerts from LinkedIn and StepStone
+- 🕷️ **Multi-Platform Scraping**: Extracts job details from:
+  - Stellenwerk.de (Dortmund student jobs)
+  - LinkedIn job postings
+  - StepStone job listings
+- 📄 **PDF Generation**: Automatically converts cover letters to professionally formatted PDFs
+- 💾 **Job Tracking**: SQLite database to track viewed/unviewed job postings
+- 👤 **User Profiles**: Stores user resume, expected salary, and graduation date
 
 ## Installation
 
-## Installation Instructions
+1. Clone the repository:
+```bash
+git clone <repository-url>
+cd smart-cover-letter-agent
+```
 
-To set up the Smart Cover Letter Agent on your local machine, follow these steps:
+2. Install dependencies:
+```bash
+pip install -r requirements.txt
+```
 
-1. **Clone the Repository:**
-   ```bash
-   git clone git@github.com:armin2080/smart-cover-letter-agent.git
-   cd smart-cover-letter-agent
-   ```
-
-2. **Create a Virtual Environment** (optional but recommended):
-   ```python
-   python -m venv venv
-   source venv/bin/activate  # On Windows use `venv\Scripts\activate`
-   ```
-
-3. **Install Required Packages:** Make sure you have pip installed, then run.
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-4. **Create Configuration File:** Create a config.json file in the project root with the following structure.
-   ```json
-   {
-    "api_key": "YOUR_AGENT_API_KEY",
-    "bot_token": "YOUR_BOT_TOKEN",
-    "user_id": "YOUR_TELEGRAM_USER_ID",
+3. Set up your `config.json` file:
+```json
+{
+    "api_key": "YOUR_GEMINI_API_KEY",
+    "bot_token": "YOUR_TELEGRAM_BOT_TOKEN",
+    "user_id": YOUR_TELEGRAM_USER_ID,
     "gmail": {
-        "email": "YOUR_EMAIL",
-        "password": "YOUR_APP_PASSWORD"
-    },
-    "resume": "YOUR_RESUME_IN_TEXT_FORMAT"
-   }
-    ```
+        "email": "your.email@gmail.com",
+        "password": "your_app_password"
+    }
+}
+```
 
+### Configuration Setup
+
+1. **Gemini API Key**: Get from [Google AI Studio](https://makersuite.google.com/app/apikey)
+2. **Telegram Bot Token**: Create a bot via [@BotFather](https://t.me/botfather)
+3. **Telegram User ID**: Get from [@userinfobot](https://t.me/userinfobot)
+4. **Gmail App Password**: Generate from [Google Account Settings](https://myaccount.google.com/apppasswords)
 
 ## Usage
 
-Once you have installed the Smart Cover Letter Agent and set up your configuration file, you can start using it as follows:
+### Starting the Bot
 
-1. **Run the Application:**
-Make sure your virtual environment is activated (if applicable) and run:
-   ```bash
-   python bot.py
-   ```
+```bash
+python bot.py
+```
 
-2. **Interact with the Telegram Bot:** 
-Using your Telegram bot commands, you can access various features of the agent. Here are the available commands:
+### Telegram Commands
 
-- `/start` - Start the bot and register your information.
-- `/info` - Get your registered information (resume, expected salary, graduation date).
-- `/unchecked` - Get a list of unchecked jobs in stellenwerk.de in Dortmund.
-- `/pdf` - Convert text to PDF.
-- `/scrape` - Manually trigger a job scraping from stellenwerk.de.
+- `/start` - Register as a new user (first-time setup)
+- `/help` - Display available commands
+- `/info` - View your registered information (resume, salary, graduation date)
+- `/unchecked` - List unchecked jobs from Stellenwerk.de
+- `/pdf` - Convert any text to PDF format
+- `/scrape` - Manually trigger job scraping from Stellenwerk.de
 
-3. **Request a Cover Letter:**
-You can also send a message with a job link (from Stellenwerk, LinkedIn, or StepStone) to get a personalized cover letter.
+### Quick Cover Letter Generation
 
-4. **Receive Your Cover Letter:** 
-After processing your request, you will receive a clean PDF file of the generated cover letter directly in your Telegram chat.
+Simply send a job link (from Stellenwerk, LinkedIn, or StepStone) to the bot, and it will:
+1. Extract the job details
+2. Generate a personalized cover letter based on your profile
+3. Return a formatted PDF ready for application
 
+## Project Structure
 
-## Contributing
+```
+smart-cover-letter-agent/
+├── agent.py          # AI cover letter generation using Gemini API
+├── bot.py            # Main Telegram bot with command handlers
+├── scraper.py        # Web scraping for job platforms
+├── gmail.py          # Email monitoring for job alerts
+├── database.py       # SQLite database management
+├── config.json       # Configuration file (credentials)
+├── requirements.txt  # Python dependencies
+└── README.md         # This file
+```
 
-Contributions to the Smart Cover Letter Agent are welcome! If you would like to contribute, please follow these guidelines:
+## How It Works
 
-1. **Fork the Repository:**
-   - Click on the "Fork" button at the top right of this page to create your own copy of the repository.
+1. **Job Discovery**:
+   - Bot scrapes Stellenwerk.de for new job postings
+   - Monitors Gmail inbox for job alerts from LinkedIn/StepStone
+   - Stores new jobs in SQLite database
 
-2. **Create a Branch:**
-   - Create a new branch for your feature or bug fix:
-     ```bash
-     git checkout -b feature/YourFeatureName
-     ```
+2. **User Interaction**:
+   - User sends job link to bot
+   - Bot extracts job details (title, description, requirements)
 
-3. **Make Your Changes:**
-   - Make your changes and commit them with a descriptive message:
-     ```bash
-     git commit -m "Add new feature"
-     ```
+3. **Cover Letter Generation**:
+   - AI analyzes job requirements vs. user's resume
+   - Generates personalized, relevant cover letter
+   - Returns professionally formatted PDF
 
-4. **Push to Your Fork:**
-   - Push your changes back to your forked repository:
-     ```bash
-     git push origin feature/YourFeatureName
-     ```
+## Database Schema
 
-5. **Open a Pull Request:**
-   - Go to the original repository and click on "New Pull Request." Describe your changes and submit it for review.
+### Jobs Table
+- `id`: Primary key
+- `title`: Job title
+- `link`: Job URL
+- `checked`: Boolean (viewed status)
 
-6. **Respect Project Guidelines:**
-   - Please ensure that your code follows existing project conventions and is well-documented.
+### Users Table
+- `id`: Primary key
+- `name`: User's full name
+- `username`: Telegram username
+- `resume`: Full resume text
+- `expected_salary`: Hourly rate in EUR
+- `graduation_date`: Expected graduation date
+
+## Security Notes
+
+⚠️ **Important**: Never commit `config.json` to version control. Add it to `.gitignore`:
+```
+config.json
+*.db
+```
+
+## Requirements
+
+- Python 3.8+
+- Telegram account
+- Google Gemini API access
+- Gmail account with app password enabled
+
 ## License
 
-This project is licensed under the **MIT** License - see the [LICENSE](https://choosealicense.com/licenses/mit/) file for details.
+This project is for personal use. Ensure compliance with the Terms of Service of all platforms being scraped.
 
+## Troubleshooting
+
+**Bot not responding?**
+- Verify bot token in config.json
+- Check if bot.py is running without errors
+
+**Gmail monitoring not working?**
+- Ensure app password is correctly set (not regular password)
+- Enable IMAP in Gmail settings
+- Check if 2FA is enabled on Gmail account
+
+**Cover letter generation fails?**
+- Verify Gemini API key is valid
+- Check API quota limits
+- Ensure job details are being extracted correctly
+
+## Future Improvements
+
+- [ ] Add OAuth2 for Gmail authentication
+- [ ] Support for more job platforms
+- [ ] Customizable cover letter templates
+- [ ] Application tracking system
+- [ ] Multi-user support
+- [ ] Docker containerization
