@@ -1,4 +1,4 @@
-import json, os, logging, datetime, re, io, time
+import json, os, logging, datetime, re, io, asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters, ConversationHandler
 from scraper import Scraper 
@@ -30,6 +30,54 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+# --- HELPER FUNCTION FOR PDF GENERATION ---
+def generate_pdf(text):
+  """Generate a PDF from text and return a BytesIO buffer."""
+  pdf_buffer = io.BytesIO()
+  c = canvas.Canvas(pdf_buffer, pagesize=letter)
+  width, height = letter
+  left_margin = 50
+  right_margin = 50
+  top_margin = 50
+  bottom_margin = 50
+  usable_width = width - left_margin - right_margin
+  y = height - top_margin
+
+  # Split message into paragraphs and lines
+  paragraphs = text.split('\n')
+  line_height = 14
+  font_name = "Times-Roman"
+  font_size = 12
+  c.setFont(font_name, font_size)
+
+  for para in paragraphs:
+    if not para.strip():
+      y -= line_height  # Empty line for paragraph break
+      continue
+    words = para.split()
+    line = ""
+    for word in words:
+      test_line = f"{line} {word}".strip()
+      if stringWidth(test_line, font_name, font_size) <= usable_width:
+        line = test_line
+      else:
+        c.drawString(left_margin, y, line)
+        y -= line_height
+        line = word
+        if y < bottom_margin:
+          c.showPage()
+          c.setFont(font_name, font_size)
+          y = height - top_margin
+    if line:
+      c.drawString(left_margin, y, line)
+      y -= line_height
+    y -= line_height  # Extra line for paragraph break
+
+  c.save()
+  pdf_buffer.seek(0)
+  return pdf_buffer
+
+
 # Define conversation states
 PDF_TEXT = range(1)
 RESUME_TEXT, EXPECTED_SALARY, GRADUATION_DATE = range(1,4)
@@ -48,7 +96,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
   else:
     await update.message.reply_text(f"Hello @{username}!\n\nIt seems like you are a new user. I need some information from you before you can use the bot.")
-    time.sleep(5)  # Wait for 5 second to ensure the message is sent before the next one
+    await asyncio.sleep(5)  # Wait for 5 seconds to ensure the message is sent before the next one
     await update.message.reply_text(
       f"""
 First, please send me your resume in text format. Here is an example of what I need:
@@ -217,7 +265,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif 'linkedin.com' in match.group(0):
       job_details = scraper.extract_linkedin_details(match.group(0))
 
-    elif 'stepstone.de' or 'offerView' in match.group(0):
+    elif 'stepstone.de' in match.group(0) or 'offerView' in match.group(0):
       job_details = scraper.extract_stepstone_details(match.group(0))
     
     message = agent.send_request(job_details)
@@ -226,49 +274,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
       await update.message.reply_text("The model is overloaded. Please try again later.")
 
     else:
-       # Create a PDF buffer
-      pdf_buffer = io.BytesIO()
-      c = canvas.Canvas(pdf_buffer, pagesize=letter)
-      width, height = letter
-      left_margin = 50
-      right_margin = 50
-      top_margin = 50
-      bottom_margin = 50
-      usable_width = width - left_margin - right_margin
-      y = height - top_margin
-
-      # Split message into paragraphs and lines
-      paragraphs = message.split('\n')
-      line_height = 14
-      font_name = "Times-Roman"
-      font_size = 12
-      c.setFont(font_name, font_size)
-
-      for para in paragraphs:
-        if not para.strip():
-          y -= line_height  # Empty line for paragraph break
-          continue
-        words = para.split()
-        line = ""
-        for word in words:
-          test_line = f"{line} {word}".strip()
-          if stringWidth(test_line, font_name, font_size) <= usable_width:
-            line = test_line
-          else:
-            c.drawString(left_margin, y, line)
-            y -= line_height
-            line = word
-            if y < bottom_margin:
-              c.showPage()
-              c.setFont(font_name, font_size)
-              y = height - top_margin
-        if line:
-          c.drawString(left_margin, y, line)
-          y -= line_height
-        y -= line_height  # Extra line for paragraph break
-
-      c.save()
-      pdf_buffer.seek(0)
+      # Generate PDF using helper function
+      pdf_buffer = generate_pdf(message)
       # Generate a unique filename using timestamp
       timestamp = datetime.datetime.now().strftime("%m_%d_%H:%M")
       filename = f"cover_letter_{timestamp}.pdf"
@@ -285,49 +292,8 @@ async def convert_to_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("No text to convert to PDF.")
     return ConversationHandler.END
 
-  # Create a PDF buffer
-  pdf_buffer = io.BytesIO()
-  c = canvas.Canvas(pdf_buffer, pagesize=letter)
-  width, height = letter
-  left_margin = 50
-  right_margin = 50
-  top_margin = 50
-  bottom_margin = 50
-  usable_width = width - left_margin - right_margin
-  y = height - top_margin
-
-  # Split message into paragraphs and lines
-  paragraphs = message_text.split('\n')
-  line_height = 14
-  font_name = "Times-Roman"
-  font_size = 12
-  c.setFont(font_name, font_size)
-
-  for para in paragraphs:
-    if not para.strip():
-      y -= line_height  # Empty line for paragraph break
-      continue
-    words = para.split()
-    line = ""
-    for word in words:
-      test_line = f"{line} {word}".strip()
-      if stringWidth(test_line, font_name, font_size) <= usable_width:
-        line = test_line
-      else:
-        c.drawString(left_margin, y, line)
-        y -= line_height
-        line = word
-        if y < bottom_margin:
-          c.showPage()
-          c.setFont(font_name, font_size)
-          y = height - top_margin
-    if line:
-      c.drawString(left_margin, y, line)
-      y -= line_height
-    y -= line_height  # Extra line for paragraph break
-
-  c.save()
-  pdf_buffer.seek(0)
+  # Generate PDF using helper function
+  pdf_buffer = generate_pdf(message_text)
   
   timestamp = datetime.datetime.now().strftime("%m_%d_%H:%M")
   filename = f"cover_letter_{timestamp}.pdf"
