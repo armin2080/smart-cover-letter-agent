@@ -1,11 +1,4 @@
-python-telegram-bot
-bs4
-requests
-logging
-reportlab
-json
-email
-re
-time
-imaplib
-sqlite3
+python-telegram-bot>=20.0
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+reportlab>=4.0.0
