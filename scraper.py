@@ -5,42 +5,69 @@ from database import SQLiteDB
 
 
 class Scraper:
+    """Web scraper for extracting job details from multiple job platforms."""
+    
     def __init__(self):
         pass
 
     def get_html(self, url):
-
+        """Fetch and parse HTML content from a URL.
+        
+        Args:
+            url: The URL to fetch.
+            
+        Returns:
+            BeautifulSoup: Parsed HTML content.
+        """
         response = requests.get(url)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, "html.parser")
         return soup
     
     def extract_stellenwerk_details(self, soup):
-        job_title = soup.find('h1',class_="text-xl font-bold text-primary").text.strip()
-        job_tasks = soup.find('div', class_='flex flex-col gap-4').text.strip()
-        job_profile = soup.find('p', class_='flex flex-col gap-4').text.strip()
+        """Extract job details from Stellenwerk HTML.
+        
+        Args:
+            soup: BeautifulSoup object containing the parsed HTML.
+            
+        Returns:
+            dict: Job details with keys 'job_title', 'job_tasks', 'job_profile'.
+        """
+        job_title_elem = soup.find('h1',class_="text-xl font-bold text-primary")
+        job_tasks_elem = soup.find('div', class_='flex flex-col gap-4')
+        job_profile_elem = soup.find('p', class_='flex flex-col gap-4')
+
+        job_title = job_title_elem.text.strip() if job_title_elem else "N/A"
+        job_tasks = job_tasks_elem.text.strip() if job_tasks_elem else "N/A"
+        job_profile = job_profile_elem.text.strip() if job_profile_elem else "N/A"
 
         return {
             'job_title': job_title,
             'job_tasks': job_tasks,
             'job_profile': job_profile
         }
-    def send_request(self, url):
-        while True:
+    def send_request(self, url, max_retries=3):
+        retries = 0
+        while retries < max_retries:
             try:
                 response = requests.get(url, timeout=10)
                 response.raise_for_status()  # Raise an error for bad status codes
                 return response
             except requests.exceptions.RequestException as e:
-                print(f"[ERROR] Exception occurred with '{url}': {str(e)}")
-                time.sleep(10)
+                retries += 1
+                print(f"[ERROR] Exception occurred with '{url}': {str(e)} (Attempt {retries}/{max_retries})")
+                if retries < max_retries:
+                    time.sleep(10)
+        print(f"[ERROR] Max retries reached for '{url}'. Giving up.")
+        return None
         
 
     def scrape_stellenwerk(self):
-
-        # check portfolio website - irrelevant to the project. You can remove this part.:
-        response = self.send_request('https://armin2080.pythonanywhere.com/')
-
+        """Scrape job listings from Stellenwerk Dortmund.
+        
+        Returns:
+            bool: True if scraping was successful, False otherwise.
+        """
         url = 'https://www.stellenwerk.de/dortmund?filters%5BemploymentMode%5D%5Bid%5D%5B%24in%5D%5B0%5D=8'
         url2 = 'https://www.stellenwerk.de/dortmund?pagination%5Bstart%5D=10&filters%5BemploymentMode%5D%5Bid%5D%5B%24in%5D%5B0%5D=8'
         url3 = 'https://www.stellenwerk.de/dortmund?pagination%5Bstart%5D=20&filters%5BemploymentMode%5D%5Bid%5D%5B%24in%5D%5B0%5D=8'
@@ -52,6 +79,8 @@ class Scraper:
         for url in urls:
             try:
                 response = self.send_request(url)
+                if response is None:
+                    break
             except:
                 break
             soup = BeautifulSoup(response.text, 'html.parser')
@@ -79,7 +108,14 @@ class Scraper:
         return True
     
     def extract_linkedin_details(self, link):
+        """Extract job details from LinkedIn job posting.
         
+        Args:
+            link: LinkedIn job URL.
+            
+        Returns:
+            str: Extracted job description as plain text.
+        """
         link = link.split('?')[0]  # Remove query parameters if any
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -124,6 +160,14 @@ class Scraper:
 
 
     def extract_stepstone_details(self, link):
+        """Extract job details from StepStone job posting.
+        
+        Args:
+            link: StepStone job URL.
+            
+        Returns:
+            str: Formatted job details or False if extraction fails.
+        """
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
         }
@@ -174,7 +218,7 @@ class Scraper:
     
 
 if __name__ == "__main__":
+    # Test the scraper
     scraper = Scraper()
-
-        
-
+    result = scraper.scrape_stellenwerk()
+    print(f"Scraping completed: {result}")
