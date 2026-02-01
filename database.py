@@ -1,6 +1,8 @@
 import sqlite3
 
 class SQLiteDB:
+    """Base class for SQLite database operations."""
+    
     def __init__(self, db_path):
         self.db_path = db_path
         self.conn = None
@@ -34,6 +36,8 @@ class SQLiteDB:
 
 
 class JobDatabase(SQLiteDB):
+    """Database for managing job postings and tracking their status."""
+    
     def __init__(self, db_path):
         super().__init__(db_path)
         self.create_table()
@@ -65,6 +69,8 @@ class JobDatabase(SQLiteDB):
 
 
 class UserDatabase(SQLiteDB):
+    """Database for managing user profiles and application preferences."""
+    
     def __init__(self, db_path):
         super().__init__(db_path)
         self.create_table()
@@ -110,6 +116,9 @@ class UserDatabase(SQLiteDB):
 
 
 if __name__ == "__main__":
-    db = SQLiteDB("jobs.db")
-    db.execute("ALTER TABLE jobs ADD COLUMN checked BOOLEAN DEFAULT 0")
-    db.close()
+    # Database initialization test
+    job_db = JobDatabase("test_jobs.db")
+    user_db = UserDatabase("test_users.db")
+    print("Database tables created successfully.")
+    job_db.close()
+    user_db.close()
