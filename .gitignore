@@ -1,7 +1,18 @@
 /env/
 /__pycache__/
+*.pyc
+__pycache__/
 config.json
 jobs.db
 users.db
 user_jobs.db
 notebook.ipynb
+
+# Django specific
+db.sqlite3
+*.log
+*.pot
+*.pyc
+.env
+.venv
+local_settings.py
