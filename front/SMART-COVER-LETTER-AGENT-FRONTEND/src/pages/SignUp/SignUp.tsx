@@ -144,10 +144,8 @@ export default function SignUp() {
             disabled={isLoading}
             error={!!errors.password2}
             helperText={
-              errors.password2?.message ||
-              (password && !errors.password2
-                ? "Passwords match ✓"
-                : "Enter your password again")
+              errors.password2?.message || 
+              (password && watch("password2") === password && !errors.password2 ? "Passwords match ✓" : "")
             }
             {...registerField("password2", {
               required: "Please confirm your password",
