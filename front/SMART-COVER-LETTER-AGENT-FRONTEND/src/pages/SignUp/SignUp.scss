@@ -13,16 +13,34 @@
   .sign-up__title {
     font-size: 28px;
     font-weight: 600;
-    margin: 0 0 32px 0;
+    margin: 0 0 28px 0;
     text-align: center;
     color: #1a1a1a;
+  }
+
+  .sign-up__alert {
+    width: 100%;
+    margin-bottom: 20px;
+    border-radius: 6px;
+    animation: slideDown 0.3s ease-in-out;
+  }
+
+  @keyframes slideDown {
+    from {
+      opacity: 0;
+      transform: translateY(-10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
 
   .sign-up__form {
     display: flex;
     flex-direction: column;
     width: 100%;
-    gap: 20px;
+    gap: 18px;
 
     .sign-up__form-row {
       display: flex;
@@ -50,20 +68,73 @@
         display: block;
       }
     }
+
+    .MuiTextField-root {
+      .MuiOutlinedInput-root {
+        font-size: 14px;
+        border-radius: 6px;
+        transition: all 0.2s ease-in-out;
+
+        &:hover {
+          .MuiOutlinedInput-notchedOutline {
+            border-color: #ccc;
+          }
+        }
+
+        &.Mui-focused {
+          .MuiOutlinedInput-notchedOutline {
+            border-color: #1976d2;
+            border-width: 2px;
+          }
+        }
+
+        &.Mui-disabled {
+          background-color: #f5f5f5;
+        }
+      }
+
+      .MuiFormHelperText-root {
+        margin-right: 2px;
+        margin-left: 2px;
+      }
+    }
+  }
+
+  .sign-up__button-container {
+    width: 100%;
+    display: flex;
+    justify-content: center;
+    margin-top: 8px;
   }
 
   .sign-up__button {
+    width: 100%;
     margin-top: 12px;
     padding: 14px 0;
     font-size: 16px;
     font-weight: 600;
     text-transform: none;
     background-color: #1c1917;
-    border-radius: 13px;
+    border-radius: 6px;
+    transition: all 0.2s ease-in-out;
+
+    &:hover:not(:disabled) {
+      background-color: #0f0e0d;
+      box-shadow: 0 4px 12px rgba(28, 25, 23, 0.2);
+    }
+
+    &:active:not(:disabled) {
+      transform: scale(0.98);
+    }
+
+    &:disabled {
+      opacity: 0.7;
+      cursor: not-allowed;
+    }
   }
 
   .sign-up__footer {
-    margin-top: 24px;
+    margin-top: 28px;
     text-align: center;
   }
 
@@ -78,10 +149,15 @@
     text-decoration: none;
     font-weight: 600;
     transition: color 0.2s ease-in-out;
-  }
+    cursor: pointer;
 
-  .sign-up__footer-link:hover {
-    color: #1565c0;
-    text-decoration: underline;
+    &:hover {
+      color: #1565c0;
+      text-decoration: underline;
+    }
+
+    &:active {
+      color: #0d47a1;
+    }
   }
 }
