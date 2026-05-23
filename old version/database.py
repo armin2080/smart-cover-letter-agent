@@ -48,24 +48,31 @@ class JobDatabase(SQLiteDB):
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 title TEXT NOT NULL,
                 link TEXT NOT NULL,
+                user_id TEXT NOT NULL,
                 checked BOOLEAN DEFAULT 0
             )
         ''')
+        self.ensure_user_id_column()
 
-    def add_job(self, title, link):
-        self.execute('INSERT INTO jobs (title, link) VALUES (?, ?)', (title, link))
+    def ensure_user_id_column(self):
+        columns = [row[1] for row in self.fetchall('PRAGMA table_info(jobs)')]
+        if 'user_id' not in columns:
+            self.execute('ALTER TABLE jobs ADD COLUMN user_id TEXT')
 
-    def get_unchecked_jobs(self):
-        return self.fetchall('SELECT * FROM jobs WHERE checked = 0')
+    def add_job(self, title, link, user_id):
+        self.execute('INSERT INTO jobs (title, link, user_id) VALUES (?, ?, ?)', (title, link, user_id))
 
-    def mark_job_as_checked(self, job_id):
-        self.execute('UPDATE jobs SET checked = 1 WHERE id = ?', (job_id,))
+    def get_unchecked_jobs(self, user_id):
+        return self.fetchall('SELECT * FROM jobs WHERE checked = 0 AND user_id = ?', (user_id,))
 
-    def get_job_by_id(self, job_id):
-        return self.fetchone('SELECT * FROM jobs WHERE id = ?', (job_id,))
+    def mark_job_as_checked(self, job_id, user_id):
+        self.execute('UPDATE jobs SET checked = 1 WHERE id = ? AND user_id = ?', (job_id, user_id))
+
+    def get_job_by_id(self, job_id, user_id):
+        return self.fetchone('SELECT * FROM jobs WHERE id = ? AND user_id = ?', (job_id, user_id))
     
-    def job_exists(self, link):
-        return self.fetchone('SELECT 1 FROM jobs WHERE link = ?', (link,)) is not None
+    def job_exists(self, link, user_id):
+        return self.fetchone('SELECT 1 FROM jobs WHERE link = ? AND user_id = ?', (link, user_id)) is not None
 
 
 class UserDatabase(SQLiteDB):
@@ -83,20 +90,30 @@ class UserDatabase(SQLiteDB):
                 username TEXT NOT NULL,
                 resume TEXT DEFAULT NULL,
                 expected_salary INTEGER DEFAULT NULL,
-                graduation_date TEXT DEFAULT NULL
+                graduation_date TEXT DEFAULT NULL,
+                gmail_email TEXT DEFAULT NULL,
+                gmail_app_password TEXT DEFAULT NULL
             )
         ''')
+        self.ensure_gmail_columns()
 
-    def add_user(self, name, username, resume=None, expected_salary=None, graduation_date=None):
+    def ensure_gmail_columns(self):
+        columns = [row[1] for row in self.fetchall('PRAGMA table_info(users)')]
+        if 'gmail_email' not in columns:
+            self.execute('ALTER TABLE users ADD COLUMN gmail_email TEXT')
+        if 'gmail_app_password' not in columns:
+            self.execute('ALTER TABLE users ADD COLUMN gmail_app_password TEXT')
+
+    def add_user(self, name, username, resume=None, expected_salary=None, graduation_date=None, gmail_email=None, gmail_app_password=None):
         self.execute(
-            'INSERT INTO users (name, username, resume, expected_salary, graduation_date) VALUES (?, ?, ?, ?, ?)',
-            (name, username, resume, expected_salary, graduation_date)
+            'INSERT INTO users (name, username, resume, expected_salary, graduation_date, gmail_email, gmail_app_password) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            (name, username, resume, expected_salary, graduation_date, gmail_email, gmail_app_password)
         )
 
     def get_user(self, username):
         return self.fetchone('SELECT * FROM users WHERE username = ?', (username,))
     
-    def update_user(self,username, resume=None, expected_salary=None, graduation_date=None):
+    def update_user(self,username, resume=None, expected_salary=None, graduation_date=None, gmail_email=None, gmail_app_password=None):
         updates = []
         params = []
         if resume:
@@ -108,6 +125,12 @@ class UserDatabase(SQLiteDB):
         if graduation_date:
             updates.append("graduation_date = ?")
             params.append(graduation_date)
+        if gmail_email:
+            updates.append("gmail_email = ?")
+            params.append(gmail_email)
+        if gmail_app_password:
+            updates.append("gmail_app_password = ?")
+            params.append(gmail_app_password)
 
         if updates:
             query = f"UPDATE users SET {', '.join(updates)} WHERE username = ?"
