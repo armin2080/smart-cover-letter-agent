@@ -1,6 +1,7 @@
 from email.header import decode_header
-import json, re, requests, email, imaplib, time
+import json, re, requests, email, imaplib, time, datetime
 from database import JobDatabase
+from relevance import job_matches_resume
 
 # Gmail IMAP settings
 with open('config.json', 'r') as f:
@@ -50,8 +51,9 @@ class GmailClient:
         self.mail.login(self.EMAIL_ACCOUNT, self.PASSWORD)
         self.mail.select("inbox")
         
-        # Search for unread emails
-        status, messages = self.mail.search(None, 'UNSEEN')
+        # Search for unread emails in the last 7 days
+        since_date = (datetime.datetime.utcnow() - datetime.timedelta(days=7)).strftime("%d-%b-%Y")
+        status, messages = self.mail.search(None, "UNSEEN", "SINCE", since_date)
         
         # Convert messages to a list of email IDs
         email_ids = messages[0].split()
@@ -103,16 +105,22 @@ class GmailClient:
         while retries < max_retries:
             try:
                 # Follow redirects to get the final destination link
-                response = requests.get(deep_link, allow_redirects=True, headers=headers, timeout=10)
+                response = requests.get(deep_link, allow_redirects=True, headers=headers, timeout=15)
 
                 if response.status_code == 200:
                     link = response.url.split('application')[0]
-                    if 'jobs----' in link:
-                        link, job_id = link.split('-inline')[0].split('s----')
-                    
-                        return link + '/' + job_id + '/'
-                    
-                    return link
+                    job_id_match = re.search(r'jobs----(\d+)-inline', link)
+                    if not job_id_match:
+                        job_id_match = re.search(r'job/(\d+)', link)
+                    if not job_id_match:
+                        job_id_match = re.search(r'offerID/(\d+)', link)
+                    if job_id_match:
+                        return f"https://www.stepstone.de/job/{job_id_match.group(1)}"
+                    return link.split('?')[0]
+                if 300 <= response.status_code < 400:
+                    location = response.headers.get('Location')
+                    if location:
+                        return location
 
                 else:
                     print(f"[ERROR] Failed to resolve link '{deep_link}'. HTTP {response.status_code}")
@@ -128,10 +136,11 @@ class GmailClient:
                 penalty *= 2
         
         print(f"[ERROR] Max retries reached for link '{deep_link}'. Skipping...")
-        return None
+        # Fallback: return the deep link so the user can still open it manually.
+        return deep_link
 
         
-    def extract_job_details(self):
+    def extract_job_details(self, user_id, resume_text):
         """Extract job details from unread emails and save to database.
         
         Returns:
@@ -162,6 +171,9 @@ class GmailClient:
                                 final_link = match.group(0) if match else None
                                 final_link = self.convert_stepstone_link(final_link) if final_link else None
                                 if final_link:
+                                    job_text = f"{title or ''} {subject or ''} {body or ''}"
+                                    if not job_matches_resume(job_text, resume_text):
+                                        continue
                                     self.mail.store(e_id, '+FLAGS', '\\Seen')
 
                             job_details.append({
@@ -171,6 +183,7 @@ class GmailClient:
                             'subject': subject,
                             })
                         if len(job_details) > 0:
+                            self.mail.store(e_id, '+FLAGS', '\\Seen')
                             continue
                         
                     
@@ -210,6 +223,9 @@ class GmailClient:
                         if link:
                             final_link = self.convert_stepstone_link(link)
                             if final_link:
+                                job_text = f"{title or ''} {subject or ''} {body or ''}"
+                                if not job_matches_resume(job_text, resume_text):
+                                    continue
                                 self.mail.store(e_id, '+FLAGS', '\\Seen')
                 
                 # linkedin recommendation:
@@ -229,6 +245,9 @@ class GmailClient:
                                 final_link = match.group(0) if match else None
                                 if final_link:
                                     final_link = final_link.split('?')[0].replace('/comm', '')
+                                    job_text = f"{title or ''} {subject or ''} {body or ''}"
+                                    if not job_matches_resume(job_text, resume_text):
+                                        continue
                                     self.mail.store(e_id, '+FLAGS', '\\Seen')
 
                             job_details.append({
@@ -257,6 +276,9 @@ class GmailClient:
                                 final_link = match.group(0) if match else None
                                 if final_link:
                                     final_link = final_link.split('?')[0].replace('/comm', '')
+                                    job_text = f"{title or ''} {subject or ''} {body or ''}"
+                                    if not job_matches_resume(job_text, resume_text):
+                                        continue
                                     self.mail.store(e_id, '+FLAGS', '\\Seen')
                             job_details.append({
                                 'title': title,
@@ -264,6 +286,7 @@ class GmailClient:
                                 'from': email_addr,
                                 'subject': subject,
                             })
+                        self.mail.store(e_id, '+FLAGS', '\\Seen')
 
                 # Only append if we successfully extracted both title and link
                 if title and final_link:
@@ -276,12 +299,17 @@ class GmailClient:
                 else:
                     print(f"[WARNING] Could not extract complete job details from email ID {e_id}. Title: {title}, Link: {final_link}")
 
+                self.mail.store(e_id, '+FLAGS', '\\Seen')
+
                 
         if job_details:
             db = JobDatabase('jobs.db')
             for job in job_details:
-                if not db.job_exists(job['link']):
-                    db.add_job(job['title'], job['link'])
+                if not job.get('link'):
+                    print(f"[WARNING] Skipping job without link: {job.get('title')}")
+                    continue
+                if not db.job_exists(job['link'], user_id):
+                    db.add_job(job['title'], job['link'], user_id)
             db.close()
         self.mail.logout()
         
@@ -293,5 +321,5 @@ class GmailClient:
 if __name__ == "__main__":
     # Test email monitoring
     client = GmailClient(EMAIL_ACCOUNT, PASSWORD, email_list)
-    jobs = client.extract_job_details()
+    jobs = client.extract_job_details("test-user", "Python Django Data Science")
     print(f"Successfully extracted job details: {jobs}")
