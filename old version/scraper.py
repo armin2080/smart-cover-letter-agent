@@ -2,6 +2,7 @@ from bs4 import BeautifulSoup
 from bs4 import NavigableString, Tag
 import requests, json, re, time
 from database import SQLiteDB
+from relevance import job_matches_resume
 
 
 class Scraper:
@@ -19,7 +20,10 @@ class Scraper:
         Returns:
             BeautifulSoup: Parsed HTML content.
         """
-        response = requests.get(url)
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+        response = requests.get(url, headers=headers, timeout=15)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, "html.parser")
         return soup
@@ -48,9 +52,12 @@ class Scraper:
         }
     def send_request(self, url, max_retries=3):
         retries = 0
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
         while retries < max_retries:
             try:
-                response = requests.get(url, timeout=10)
+                response = requests.get(url, headers=headers, timeout=15)
                 response.raise_for_status()  # Raise an error for bad status codes
                 return response
             except requests.exceptions.RequestException as e:
@@ -62,15 +69,15 @@ class Scraper:
         return None
         
 
-    def scrape_stellenwerk(self):
+    def scrape_stellenwerk(self, user_id, resume_text):
         """Scrape job listings from Stellenwerk Dortmund.
         
         Returns:
             bool: True if scraping was successful, False otherwise.
         """
-        url = 'https://www.stellenwerk.de/dortmund?filters%5BemploymentMode%5D%5Bid%5D%5B%24in%5D%5B0%5D=8'
-        url2 = 'https://www.stellenwerk.de/dortmund?pagination%5Bstart%5D=10&filters%5BemploymentMode%5D%5Bid%5D%5B%24in%5D%5B0%5D=8'
-        url3 = 'https://www.stellenwerk.de/dortmund?pagination%5Bstart%5D=20&filters%5BemploymentMode%5D%5Bid%5D%5B%24in%5D%5B0%5D=8'
+        url = 'https://www.stellenwerk.de/dortmund'
+        url2 = 'https://www.stellenwerk.de/dortmund?pagination%5Bstart%5D=10'
+        url3 = 'https://www.stellenwerk.de/dortmund?pagination%5Bstart%5D=20'
 
         urls = [url, url2, url3]
         
@@ -86,23 +93,35 @@ class Scraper:
             soup = BeautifulSoup(response.text, 'html.parser')
 
             offers_section = soup.find('section', class_='mx-auto flex w-full max-w-screen-xl flex-grow flex-col justify-between gap-4 p-4')
-            offers_links = []
+            if not offers_section:
+                print(f"[WARNING] Stellenwerk offers section not found for {url}")
+                continue
+            offers = {}
             for a in offers_section.find_all('a', href=True):
-                link = a['href']
-                if not link.startswith('http'):
-                    link = 'https://www.stellenwerk.de' + link
-                offers_links.append(link)
-            offers_titles = offers_section.find_all('p', class_ = 'text-xl text-primary font-bold')
+                href = a['href']
+                if not href.startswith('/dortmund/'):
+                    continue
+                if not re.search(r'-\d+-\d+$', href):
+                    continue
+                link = f"https://www.stellenwerk.de{href}"
+                title = a.get_text(" ", strip=True)
+                if not title:
+                    slug = href.rsplit('/', 1)[-1]
+                    title = slug.rsplit('-', 2)[0].replace('-', ' ')
+                offers[link] = title
 
-
-            for i in range(len(offers_links)):
-                offer_link = offers_links[i]
-                offer_title = offers_titles[i].text.strip()
+            if not offers:
+                print(f"[WARNING] No offers found for {url}")
+                continue
+            for offer_link, offer_title in offers.items():
                 
+                if not job_matches_resume(offer_title, resume_text):
+                    continue
+
                 # Check if a row with the same link exists
-                exists = db.fetchone("SELECT 1 FROM jobs WHERE link = ?", (offer_link,))
+                exists = db.fetchone("SELECT 1 FROM jobs WHERE link = ? AND user_id = ?", (offer_link, user_id))
                 if not exists:
-                    db.execute("INSERT INTO jobs (title, link) VALUES (?,?)", (offer_title, offer_link))
+                    db.execute("INSERT INTO jobs (title, link, user_id) VALUES (?,?,?)", (offer_title, offer_link, user_id))
             
         db.close()
         return True
@@ -149,14 +168,16 @@ class Scraper:
     
 
     def convert_stepstone_link(self, deep_link):
-        # Extract job ID from the link
-        match = re.search(r'offerID/(\d+)', deep_link)
+        # Extract job ID from common StepStone URL patterns
+        match = re.search(r'jobs----(\d+)-inline', deep_link)
+        if not match:
+            match = re.search(r'job/(\d+)', deep_link)
+        if not match:
+            match = re.search(r'offerID/(\d+)', deep_link)
         if match:
             job_id = match.group(1)
-            # Return the clean browser URL
             return f"https://www.stepstone.de/job/{job_id}"
-        else:
-            return "Invalid link – job ID not found."
+        return "Invalid link – job ID not found."
 
 
     def extract_stepstone_details(self, link):
@@ -220,5 +241,5 @@ class Scraper:
 if __name__ == "__main__":
     # Test the scraper
     scraper = Scraper()
-    result = scraper.scrape_stellenwerk()
+    result = scraper.scrape_stellenwerk("test-user", "Python Django Data Science")
     print(f"Scraping completed: {result}")
