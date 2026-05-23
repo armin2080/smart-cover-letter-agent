@@ -1,101 +1,34 @@
 import json
+import os
 import requests
 
 with open('config.json', 'r', encoding='utf-8') as f:
     config_data = json.load(f)
 
-API_KEY = config_data.get('api_key', '')
+# Prefer a dedicated Groq key; fall back to api_key for compatibility.
+API_KEY = os.getenv('GROQ_API_KEY') or config_data.get('groq_api_key') or config_data.get('api_key', '')
 
+url = "https://api.groq.com/openai/v1/chat/completions"
+headers = {
+    'Content-Type': 'application/json',
+    'Authorization': f"Bearer {API_KEY}",
+}
 
-url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={API_KEY}"
-headers = {'Content-Type': 'application/json'}
+# Default Groq model; adjust if you prefer a different one.
+MODEL = config_data.get('groq_model', 'llama-3.1-70b-versatile')
 
 
 class Agent:
-    """AI agent for generating personalized cover letters using Google's Gemini API."""
-    
+    """AI agent for generating personalized cover letters using Groq."""
+
     def __init__(self):
-        self.prompt = """
-        I want you to write a cover letter for this job offer. before writing, you must have some information about me, to personalize the cover letter. 
-        My name is Armin Maddah Asl. I am a master student in data science at TU Dortmund. I have a bachelor in computer science.
-        I have work experience as data analyst and also backend developer. I have C1 english and around B1 German.
-        here is my resume:
-        EDUCATION
+        self.instructions = (
+            "Write a concise, professional cover letter tailored to the job. "
+            "Use only the candidate resume and the job details provided. "
+            "Do not invent facts, do not use placeholders, and return only the cover letter."
+        )
 
-ARMIN MADDAH ASL
-JUNIOR DATA SCIENTIST
-
-CONTACT
-+49 177900 5396
-arminmaddah.a@gmail.com
-Dortmund, Germany
-portfolio website
-
-SKILLS
-Python
-Machine Learning
-Deep Learning
-Database Management
-Django
-Git
-Linux
-Power BI
-Microsoft Office
-
-TU DORTMUND
-Master of Data Science 2024 - Present
-
-KHARAZMI UNIVERSITY
-Bachelor of Computer Science. GPA: 92% 2020 - 2024
-
-LANGUAGES
-English - Bilingual (C1)
-German - pre-intermediate (A2 - B1)
-Persian - Native
-
-WORK EXPERIENCE
-
-07.2022 - 01.2023 Data Analyst, Young Talents Co.
-
-Analyzing text message data to identify trends and improve user feedback quickly.
-Creating interactive Power BI dashboards connected to the company database for live data visualization.
-Extracting insights from advertising and reporting systems using Python libraries.
-Utilizing PostgreSQL and MySQL to analyze complex databases for accurate queries.
-Visualizing data with Pandas and Matplotlib, providing clear reports on performance indicators.
-02.2022 - 05.2022 Backend Developer, Arman Rayan Sharif
-
-Developing the backend functionality of the website with Django.
-Creating APIs using Django REST Framework to support frontend interactions.
-Designing and implementing the admin page for efficient content management.
-Working with databases to structure and store data effectively.
-Contributing to the frontend, particularly in implementing the authentication system.
-PROJECTS
-
-Snake Game AI
-This project implements a Snake Game where an AI learns to play the game using Deep Q-Learning. The AI trains over multiple iterations, improving its performance and strategy. The game is implemented in Python using Pygame for the visuals and PyTorch for the AI model.
-
-Fashion MNIST Classification
-This project applies Principal Component Analysis (PCA) and Random Forest Classification to the Fashion MNIST dataset. The goal is to demonstrate the effect of PCA on model performance, particularly how dimensionality reduction impacts both accuracy and training time.
-
-Customer Behavior Analysis
-This project performs customer segmentation using the RFM (Recency, Frequency, and Monetary) framework combined with K-Means clustering. The primary goal is to divide customers into distinct groups based on their purchasing behavior to enable better-targeted marketing and customer retention strategies.
-
-CERTIFICATES
-
-Project-Oriented Course In Creating Telegram Bot Using Python Quera | 2024
-Professional Project-Oriented Course In Machine Learning With Python Quera | 2023
-Task-Oriented Course In Data Analysis With Python Quera | 2023
-Data Science Methodology Coursera | 2022
-Tools for Data Science Coursera | 2022
-Python Web Development with Django Tehran Institute of Technology | 2022
-Task-Oriented course in version control with GIT Quera | 2021
-Advanced Python programming and object-oriented thinking course Quera | 2021
-
-
-remember, you do not need to use all the information in my resume, just use the information that is relevant to the job offer.
-"""
-
-    def send_request(self, job_details):
+    def send_request(self, job_details, resume_text):
         """Send a request to Gemini API to generate a cover letter.
         
         Args:
@@ -105,29 +38,31 @@ remember, you do not need to use all the information in my resume, just use the 
         Returns:
             str: Generated cover letter or error message.
         """
-        # Create a local copy to avoid mutating self.prompt
-        prompt = self.prompt
+        if not resume_text:
+            return "Please register your resume first."
+
+        prompt = self.instructions + "\n\nCandidate resume:\n" + resume_text.strip() + "\n\n"
         try:
-            prompt += f"Job Title: {job_details['job_title']}\n\nJob Tasks: {job_details['job_tasks']}\n\nJob Profile: {job_details['job_profile']}."
-        except:
-            prompt += job_details
-        prompt += "remember, just send me the cover letter, nothing else, no explanation, no introduction, just the cover letter. do not use any placeholders in your letter."
+            prompt += (
+                f"Job Title: {job_details['job_title']}\n\n"
+                f"Job Tasks: {job_details['job_tasks']}\n\n"
+                f"Job Profile: {job_details['job_profile']}\n"
+            )
+        except Exception:
+            prompt += str(job_details)
+        prompt += "\nReturn only the cover letter."
         data = {
-            "contents": [
-                {
-                    "parts": [
-                        {
-                            "text": prompt
-                        }
-                    ]
-                }
-            ]
+            "model": MODEL,
+            "messages": [
+                {"role": "user", "content": prompt}
+            ],
+            "temperature": 0.7,
         }
         response = requests.post(url, headers=headers, json=data).json()
         try:
-            response_text = response['candidates'][0]['content']['parts'][0]['text'].strip()
-        except:
-            response_text = response['error']['message'].strip()
+            response_text = response['choices'][0]['message']['content'].strip()
+        except Exception:
+            response_text = response.get('error', {}).get('message', 'Unknown error').strip()
         return response_text
 
 
@@ -139,4 +74,4 @@ if __name__ == "__main__":
         'job_tasks': 'Analyze data and create reports',
         'job_profile': 'Bachelor in Computer Science, Python skills'
     }
-    print(agent.send_request(test_job))
+    print(agent.send_request(test_job, "Python Django Data Science"))
