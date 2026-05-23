@@ -30,7 +30,8 @@ pip install -r requirements.txt
 3. Set up your `config.json` file:
 ```json
 {
-    "api_key": "YOUR_GEMINI_API_KEY",
+   "api_key": "YOUR_GROQ_API_KEY",
+   "encryption_key": "YOUR_FERNET_KEY",
     "bot_token": "YOUR_TELEGRAM_BOT_TOKEN",
     "user_id": YOUR_TELEGRAM_USER_ID,
     "gmail": {
@@ -42,10 +43,11 @@ pip install -r requirements.txt
 
 ### Configuration Setup
 
-1. **Gemini API Key**: Get from [Google AI Studio](https://makersuite.google.com/app/apikey)
+1. **Groq API Key**: Get from [Groq Console](https://console.groq.com/keys)
 2. **Telegram Bot Token**: Create a bot via [@BotFather](https://t.me/botfather)
 3. **Telegram User ID**: Get from [@userinfobot](https://t.me/userinfobot)
 4. **Gmail App Password**: Generate from [Google Account Settings](https://myaccount.google.com/apppasswords)
+5. **Encryption Key**: Generate a Fernet key and keep it stable across runs
 
 ## Usage
 
@@ -80,6 +82,7 @@ smart-cover-letter-agent/
 ├── scraper.py        # Web scraping for job platforms
 ├── gmail.py          # Email monitoring for job alerts
 ├── database.py       # SQLite database management
+├── security.py       # Secret encryption helpers
 ├── config.json       # Configuration file (credentials)
 ├── requirements.txt  # Python dependencies
 └── README.md         # This file
@@ -124,6 +127,8 @@ smart-cover-letter-agent/
 config.json
 *.db
 ```
+
+Gmail app passwords are encrypted before being written to SQLite. Keep the `encryption_key` unchanged after users register, or the stored passwords will no longer decrypt.
 
 ## Requirements
 
