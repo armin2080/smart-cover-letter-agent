@@ -1,14 +1,13 @@
-import json, os, logging, datetime, re, io, asyncio, time
+import json, os, logging, datetime, re, io, asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters, ConversationHandler
 from scraper import Scraper 
 from database import JobDatabase, UserDatabase
+from urllib.parse import urlparse
 from agent import Agent 
-from gmail import GmailClient
 from reportlab.pdfgen import canvas
 from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.lib.pagesizes import letter
-from security import encrypt_secret, decrypt_secret
 
 
 # Load configuration from config.json
@@ -18,7 +17,6 @@ with open(config_path, "r") as config_file:
 
 # --- CONFIGURATION ---
 BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN') or config.get('bot_token')
-ENCRYPTION_KEY = os.getenv('SCLA_SECRET_KEY') or config.get('encryption_key', '')
 
 # --- SCRAPER AND DATABASE SETUP ---
 scraper = Scraper()
@@ -32,8 +30,6 @@ logger = logging.getLogger(__name__)
 
 
 UNCHECKED_LIMIT = 10
-GMAIL_COOLDOWN_SECONDS = 300
-_last_gmail_check_ts = 0.0
 
 # --- HELPER FUNCTION FOR PDF GENERATION ---
 def generate_pdf(text):
@@ -48,17 +44,31 @@ def generate_pdf(text):
   usable_width = width - left_margin - right_margin
   y = height - top_margin
 
-  # Split message into paragraphs and lines
   paragraphs = text.split('\n')
   line_height = 14
   font_name = "Times-Roman"
   font_size = 12
   c.setFont(font_name, font_size)
 
+  def ensure_space():
+    nonlocal y
+    if y < bottom_margin:
+      c.showPage()
+      c.setFont(font_name, font_size)
+      y = height - top_margin
+
+  def draw_line(line_text: str):
+    nonlocal y
+    c.drawString(left_margin, y, line_text)
+    y -= line_height
+    ensure_space()
+
   for para in paragraphs:
     if not para.strip():
-      y -= line_height  # Empty line for paragraph break
+      y -= line_height
+      ensure_space()
       continue
+
     words = para.split()
     line = ""
     for word in words:
@@ -66,24 +76,20 @@ def generate_pdf(text):
       if stringWidth(test_line, font_name, font_size) <= usable_width:
         line = test_line
       else:
-        c.drawString(left_margin, y, line)
-        y -= line_height
+        if line:
+          draw_line(line)
         line = word
-        if y < bottom_margin:
-          c.showPage()
-          c.setFont(font_name, font_size)
-          y = height - top_margin
+
     if line:
-      c.drawString(left_margin, y, line)
-      y -= line_height
-    y -= line_height  # Extra line for paragraph break
+      draw_line(line)
+
+    y -= line_height
+    ensure_space()
 
   c.save()
   pdf_buffer.seek(0)
   return pdf_buffer
 
-
-# Define conversation states
 PDF_TEXT = range(1)
 (
   RESUME_NAME,
@@ -98,11 +104,9 @@ PDF_TEXT = range(1)
   RESUME_EXPERIENCE,
   RESUME_PROJECTS,
   RESUME_CERTS,
-  GMAIL_EMAIL,
-  GMAIL_APP_PASSWORD,
   EXPECTED_SALARY,
   GRADUATION_DATE,
-) = range(1, 17)
+) = range(1, 15)
 
 
 def get_username(update: Update):
@@ -115,6 +119,16 @@ async def require_registered(update: Update):
   if not user:
     await update.message.reply_text("Please register first with /start.")
     return None
+  # Migrate any jobs stored under the numeric Telegram id to the canonical username
+  try:
+    numeric_id = str(update.effective_user.id)
+    # Update jobs table rows where user_id == numeric_id to use the username key
+    cursor = job_db.execute("UPDATE jobs SET user_id = ? WHERE user_id = ?", (username, numeric_id))
+    if cursor.rowcount and cursor.rowcount > 0:
+      logger.info(f"Migrated {cursor.rowcount} job rows from {numeric_id} to {username}")
+  except Exception:
+    # Non-critical; continue if migration fails
+    pass
   return user
 
 
@@ -181,6 +195,42 @@ def build_resume_text(data: dict):
   return "\n".join(lines).strip()
 
 
+def get_source_label(link: str) -> str:
+  domain = urlparse(link).netloc.replace('www.', '') if link else 'unknown'
+  if 'linkedin' in domain:
+    return 'LinkedIn'
+  if 'stepstone' in domain:
+    return 'StepStone'
+  if 'stellenwerk' in domain:
+    return 'Stellenwerk'
+  return domain or 'unknown'
+
+
+def extract_job_details_from_url(url: str):
+  if 'stellenwerk.de' in url:
+    soup = scraper.get_html(url)
+    return scraper.extract_stellenwerk_details(soup)
+  if 'linkedin.com' in url:
+    return scraper.extract_linkedin_details(url)
+  if 'stepstone.de' in url or 'offerView' in url:
+    return scraper.extract_stepstone_details(url)
+  return None
+
+
+def build_job_action_keyboard(job_id: str, cover_letter_ready: bool = False):
+  if cover_letter_ready:
+    buttons = [[
+      InlineKeyboardButton("Mark as seen", callback_data=f"seen:{job_id}"),
+      InlineKeyboardButton("Create PDF", callback_data=f"pdf:{job_id}"),
+    ]]
+  else:
+    buttons = [[
+      InlineKeyboardButton("Mark as seen", callback_data=f"seen:{job_id}"),
+      InlineKeyboardButton("Create cover letter", callback_data=f"cover:{job_id}"),
+    ]]
+  return InlineKeyboardMarkup(buttons)
+
+
 # --- STARTUP MESSAGE ---
 # --- USER REGISTRATION CONVERSATION HANDLER ---
 
@@ -188,10 +238,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
   username = get_username(update)
   user = user_db.get_user(username)
   if user:
-    if not user[6] or not user[7]:
-      await update.message.reply_text("I need your Gmail details to enable email scraping.")
-      context.user_data['update_gmail_only'] = True
-      return GMAIL_EMAIL
     await update.message.reply_text(
       f"Hello {update.effective_user.first_name}, I am your job scraping bot! Use /help to see available commands."
     )
@@ -293,34 +339,6 @@ async def get_resume_certs(update: Update, context: ContextTypes.DEFAULT_TYPE):
   context.user_data['resume_certs'] = normalize_optional(update.message.text)
   resume_text = build_resume_text(context.user_data)
   context.user_data['resume'] = resume_text
-  await update.message.reply_text("Please send your Gmail address for job alerts.")
-  return GMAIL_EMAIL
-
-async def get_gmail_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
-  gmail_email = update.message.text.strip() if update.message.text else ""
-  if '@' not in gmail_email:
-    await update.message.reply_text("Please enter a valid Gmail address (e.g. name@gmail.com).")
-    return GMAIL_EMAIL
-  context.user_data['gmail_email'] = gmail_email
-  await update.message.reply_text("Please send your Gmail app password (not your normal password).")
-  return GMAIL_APP_PASSWORD
-
-async def get_gmail_app_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
-  gmail_app_password = update.message.text.strip() if update.message.text else ""
-  if len(gmail_app_password) < 8:
-    await update.message.reply_text("Please enter a valid app password (at least 8 characters).")
-    return GMAIL_APP_PASSWORD
-  context.user_data['gmail_app_password'] = encrypt_secret(gmail_app_password, ENCRYPTION_KEY)
-  if context.user_data.get('update_gmail_only'):
-    username = get_username(update)
-    user_db.update_user(
-      username,
-      gmail_email=context.user_data.get('gmail_email'),
-      gmail_app_password=context.user_data.get('gmail_app_password')
-    )
-    context.user_data.pop('update_gmail_only', None)
-    await update.message.reply_text("Gmail credentials updated. You can now use /scrape.")
-    return ConversationHandler.END
   await update.message.reply_text("What is your expected salary per hour (in EUR)?")
   return EXPECTED_SALARY
 
@@ -354,9 +372,7 @@ async def get_graduation_date(update: Update, context: ContextTypes.DEFAULT_TYPE
     username=username,
     resume=context.user_data['resume'],
     expected_salary=context.user_data['expected_salary'],
-    graduation_date=context.user_data['graduation_date'],
-    gmail_email=context.user_data.get('gmail_email'),
-    gmail_app_password=context.user_data.get('gmail_app_password')
+    graduation_date=context.user_data['graduation_date']
   )
   await update.message.reply_text("Thank you! Your data has been saved. You can now use the bot. Use /help to see available commands.")
   return ConversationHandler.END
@@ -374,8 +390,7 @@ async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
   info_text = (
     f"Resume:\n {user[3]}\n\n\n\n\n"
     f"Expected Salary: {user[4]} EUR/hour\n\n"
-    f"Graduation Date: {user[5]}\n\n"
-    f"Gmail: {user[6] or 'Not set'}"
+    f"Graduation Date: {user[5]}"
   )
   await update.message.reply_text(info_text)
 
@@ -392,130 +407,148 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Here are the available commands:\n"
         "/start - Start the bot and register your information.\n"
         "/info - Get your registered information (resume, expected salary, graduation date).\n"
-        "/unchecked - Get a list of unchecked jobs in stellenwerk.de in Dortmund.\n"
+         "/list - Show your saved jobs and choose actions.\n"
     "/pdf - Convert text to PDF.\n"
-    "/pdf_last - Convert the last cover letter to PDF.\n"
-        "/scrape - Manually trigger a job scraping from stellenwerk.de.\n"
-        "You can also send a message with a job link (from Stellenwerk, Linkedin, or StepStone) to get a cover letter."
+    "/pdf_last - Legacy fallback for the last generated cover letter.\n"
+        "/scrape - Manually trigger public job scraping from StepStone and Stellenwerk.\n"
+         "Job links are no longer auto-processed. Use /list and the buttons on a saved job."
     )
     await update.message.reply_text(help_text)
 
 # --- SCRAPE JOB FUNCTION ---
 async def scrape_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-  global _last_gmail_check_ts
   user = await require_registered(update)
   if not user:
     return
-  user_id = str(update.effective_user.id)
+  user_key = get_username(update)
   resume_text = user[3] or ""
-  await update.message.reply_text("Starting scrape and Gmail check. This can take a minute...")
-  scrape = await asyncio.to_thread(scraper.scrape_stellenwerk, user_id, resume_text)
+  await update.message.reply_text("Starting scrape on StepStone, Stellenwerk and LinkedIn. This may take a while...")
+  # run scrapers in thread pool (Playwright may be used for LinkedIn)
+  stepstone_ok = await asyncio.to_thread(scraper.scrape_stepstone, user_key, resume_text)
+  stellenwerk_ok = await asyncio.to_thread(scraper.scrape_stellenwerk, user_key, resume_text)
+  linkedin_ok = False
+  try:
+    # LinkedIn scraper will try requests first, then Playwright if needed
+    linkedin_ok = await asyncio.to_thread(scraper.scrape_linkedin, user_key, resume_text)
+  except Exception as exc:
+    print(f"[WARNING] LinkedIn scrape raised: {exc}")
 
-  now = time.time()
-  gmail_ran = False
-  if now - _last_gmail_check_ts >= GMAIL_COOLDOWN_SECONDS:
-    try:
-      gmail_password = decrypt_secret(user[7], ENCRYPTION_KEY)
-      if user[6] and gmail_password:
-        email_checker = GmailClient(user[6], gmail_password)
-        await asyncio.to_thread(email_checker.extract_job_details, user_id, resume_text)
-        _last_gmail_check_ts = now
-        gmail_ran = True
-      else:
-        await update.message.reply_text("No Gmail credentials on file. Gmail check skipped.")
-    except Exception as exc:
-      logger.exception("Gmail check failed: %s", exc)
+  await update.message.reply_text("Scrape completed. Use /list to see saved jobs.")
 
-  if scrape:
-    status = "✅ Scraping completed."
-    if gmail_ran:
-      status += " Gmail checked."
-    else:
-      status += " Gmail check skipped (cooldown)."
-    await update.message.reply_text(status)
+  if stepstone_ok or stellenwerk_ok or linkedin_ok:
+    await update.message.reply_text("✅ Scraping completed from public job pages.")
   else:
     await update.message.reply_text("❌ Scraping failed.")
 
-# --- /unchecked COMMAND HANDLER ---
-async def unchecked_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def list_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+  """List saved jobs for the calling user, showing a few items per source."""
   user = await require_registered(update)
   if not user:
     return
-  user_id = str(update.effective_user.id)
-  jobs = job_db.get_unchecked_jobs(user_id)
-
-  if not jobs:
-    await update.message.reply_text("No unchecked jobs found.")
+  username = get_username(update)
+  rows = job_db.fetchall('SELECT id, title, link, checked FROM jobs WHERE user_id = ? AND checked = 0 ORDER BY id DESC', (username,))
+  if not rows:
+    await update.message.reply_text("You have no saved jobs. Run /scrape to discover jobs.")
     return
 
-  total = len(jobs)
-  jobs = jobs[:UNCHECKED_LIMIT]
+  # Group by domain/source and show up to N per source
+  per_source_limit = 5
+  grouped = {}
+  for jid, title, link, checked in rows:
+    src = get_source_label(link)
+    grouped.setdefault(src, []).append((jid, title, link))
 
-  keyboard = [
-    [InlineKeyboardButton(job[1], callback_data=job[0])]
-    for job in jobs
-  ]
+  keyboard = []
+  for src in sorted(grouped.keys()):
+    for jid, title, link in grouped[src][:per_source_limit]:
+      label = f"[{src}] {title}"
+      keyboard.append([InlineKeyboardButton(label, callback_data=f"view:{jid}")])
+
   reply_markup = InlineKeyboardMarkup(keyboard)
-  remaining = max(total - len(jobs), 0)
-  note = f"Showing {len(jobs)} of {total}." if total > len(jobs) else ""
-  if remaining:
-    note += f" {remaining} more not shown."
+  total = len(rows)
+  shown = sum(min(len(v), per_source_limit) for v in grouped.values())
+  note = f"Showing {shown} of {total} (up to {per_source_limit} per source)."
   await update.message.reply_text(f"Select a job to get the link: {note}", reply_markup=reply_markup)
 
 # --- CALLBACK FOR BUTTON PRESS ---
 async def job_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    user_id = str(query.from_user.id)
-    job_id = query.data
+  query = update.callback_query
+  await query.answer()
+  user_id = (query.from_user.username or str(query.from_user.id))
+  data = query.data or ""
+
+  if data.startswith('view:'):
+    job_id = data.split(':', 1)[1]
+    job = job_db.get_job_by_id(job_id, user_id)
+    if not job:
+      await query.edit_message_text(text="Job not found for your account.")
+      return
+    await query.edit_message_text(
+      text=f"{job[1]}\n\n{job[2]}",
+      reply_markup=build_job_action_keyboard(job_id, cover_letter_ready=False),
+      disable_web_page_preview=True,
+    )
+    return
+
+  if data.startswith('seen:'):
+    job_id = data.split(':', 1)[1]
     job = job_db.get_job_by_id(job_id, user_id)
     if not job:
       await query.edit_message_text(text="Job not found for your account.")
       return
     job_db.mark_job_as_checked(job_id, user_id)
-
-    await query.edit_message_text(text=f"Here is the job link:\n{job[2]}")
-
-
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-  user = await require_registered(update)
-  if not user:
+    await query.edit_message_text(text=f"Marked as seen. Removed from /list.\n\n{job[1]}")
     return
-  message_text = update.message.text
-  url_pattern = re.compile(r'https?://\S+')
-  match = url_pattern.search(message_text)
-  
-  if not match:
-    await update.message.reply_text(f"No links found in the message.")
 
-  else:
-    job_details = None
-    url = match.group(0)
+  if data.startswith('cover:'):
+    job_id = data.split(':', 1)[1]
+    job = job_db.get_job_by_id(job_id, user_id)
+    if not job:
+      await query.edit_message_text(text="Job not found for your account.")
+      return
+    user = await require_registered(update)
+    if not user:
+      return
     resume_text = user[3] or ""
-
-    if 'stellenwerk.de' in url:
-      soup = await asyncio.to_thread(scraper.get_html, url)
-      job_details = scraper.extract_stellenwerk_details(soup)
-
-    elif 'linkedin.com' in url:
-      job_details = await asyncio.to_thread(scraper.extract_linkedin_details, url)
-
-    elif 'stepstone.de' in url or 'offerView' in url:
-      job_details = await asyncio.to_thread(scraper.extract_stepstone_details, url)
-
-    if not job_details:
-      await update.message.reply_text("Sorry, I could not extract job details from that link.")
+    if not resume_text:
+      await query.edit_message_text(text="Please register your resume first.")
       return
 
-    message = await asyncio.to_thread(agent.send_request, job_details, resume_text)
+    try:
+      job_details = await asyncio.to_thread(extract_job_details_from_url, job[2])
+      if not job_details:
+        await query.edit_message_text(text="Sorry, I could not extract job details from that link.")
+        return
+      message = await asyncio.to_thread(agent.send_request, job_details, resume_text)
+      if message == 'The model is overloaded. Please try again later.':
+        await query.edit_message_text(text=message)
+        return
+      generated = context.user_data.setdefault('generated_cover_letters', {})
+      generated[job_id] = message
+      context.user_data['last_cover_letter'] = message
+      await query.edit_message_text(
+        text=message,
+        reply_markup=build_job_action_keyboard(job_id, cover_letter_ready=True),
+        disable_web_page_preview=True,
+      )
+    except Exception as exc:
+      await query.message.reply_text(f"Failed to create cover letter: {exc}")
+    return
 
-    if message == 'The model is overloaded. Please try again later.':
-      await update.message.reply_text("The model is overloaded. Please try again later.")
+  if data.startswith('pdf:'):
+    job_id = data.split(':', 1)[1]
+    generated = context.user_data.get('generated_cover_letters', {})
+    cover_letter = generated.get(job_id) or context.user_data.get('last_cover_letter')
+    if not cover_letter:
+      await query.edit_message_text(text="No generated cover letter found. Create one first.")
       return
+    pdf_buffer = generate_pdf(cover_letter)
+    timestamp = datetime.datetime.now().strftime("%m_%d_%H:%M")
+    filename = f"cover_letter_{timestamp}.pdf"
+    await query.message.reply_document(document=InputFile(pdf_buffer, filename=filename))
+    return
 
-    context.user_data['last_cover_letter'] = message
-    await update.message.reply_text(message)
-    await update.message.reply_text("If you want a PDF, run /pdf_last.")
+  await query.edit_message_text(text="Unknown action.")
 
 
 async def pdf_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -539,6 +572,35 @@ async def convert_to_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE):
   await update.message.reply_document(document=InputFile(pdf_buffer, filename=filename))
   return ConversationHandler.END
 
+
+async def claim_jobs(update: Update, context: ContextTypes.DEFAULT_TYPE):
+  """Migrate any jobs stored under the numeric Telegram id to the user's canonical username."""
+  username = get_username(update)
+  numeric_id = str(update.effective_user.id)
+  try:
+    cursor = job_db.execute("SELECT COUNT(*) FROM jobs WHERE user_id = ?", (numeric_id,))
+    count = cursor.fetchone()[0]
+    if count and count > 0:
+      job_db.execute("UPDATE jobs SET user_id = ? WHERE user_id = ?", (username, numeric_id))
+      await update.message.reply_text(f"Claimed {count} jobs previously linked to your numeric id.")
+    else:
+      await update.message.reply_text("No jobs found under your numeric Telegram id.")
+  except Exception as exc:
+    await update.message.reply_text(f"Error while claiming jobs: {exc}")
+
+
+async def dedupe_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+  """Remove duplicate job entries for the calling user."""
+  user = await require_registered(update)
+  if not user:
+    return
+  username = get_username(update)
+  try:
+    deleted = job_db.dedupe_jobs(username)
+    await update.message.reply_text(f"Dedupe complete. Removed {deleted} duplicate job(s).")
+  except Exception as exc:
+    await update.message.reply_text(f"Dedupe failed: {exc}")
+
 async def pdf_last_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
   user = await require_registered(update)
   if not user:
@@ -560,8 +622,6 @@ def main():
     missing.append('bot_token')
   if not (config.get('groq_api_key') or config.get('api_key')):
     missing.append('groq_api_key or api_key')
-  if not ENCRYPTION_KEY:
-    missing.append('encryption_key or SCLA_SECRET_KEY')
   if missing:
     logger.error("Missing required config keys: %s", ", ".join(missing))
     raise SystemExit(1)
@@ -593,8 +653,6 @@ def main():
       RESUME_EXPERIENCE: [MessageHandler(filters.TEXT & (~filters.COMMAND), get_resume_experience)],
       RESUME_PROJECTS: [MessageHandler(filters.TEXT & (~filters.COMMAND), get_resume_projects)],
       RESUME_CERTS: [MessageHandler(filters.TEXT & (~filters.COMMAND), get_resume_certs)],
-      GMAIL_EMAIL: [MessageHandler(filters.TEXT & (~filters.COMMAND), get_gmail_email)],
-      GMAIL_APP_PASSWORD: [MessageHandler(filters.TEXT & (~filters.COMMAND), get_gmail_app_password)],
       EXPECTED_SALARY: [MessageHandler(filters.TEXT & (~filters.COMMAND), get_expected_salary)],
       GRADUATION_DATE: [MessageHandler(filters.TEXT & (~filters.COMMAND), get_graduation_date)],
     },
@@ -604,13 +662,13 @@ def main():
   # Conversation handlers first to avoid URL handler hijacking registration replies.
   application.add_handler(registration_conv_handler)
   application.add_handler(pdf_conv_handler)
-
-  application.add_handler(CommandHandler('unchecked', unchecked_handler))
+  application.add_handler(CommandHandler('list', list_handler))
   application.add_handler(CommandHandler('help', help_command))
   application.add_handler(CommandHandler('info', info_command))
   application.add_handler(CommandHandler('scrape', scrape_handler))
+  application.add_handler(CommandHandler('claimjobs', claim_jobs))
+  application.add_handler(CommandHandler('dedupe', dedupe_command))
   application.add_handler(CommandHandler('pdf_last', pdf_last_command))
-  application.add_handler(MessageHandler(filters.TEXT & filters.Entity("url"), handle_message))
 
   application.add_handler(CallbackQueryHandler(job_button_handler))
   application.add_error_handler(error_handler)
