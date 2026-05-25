@@ -2,7 +2,8 @@ from bs4 import BeautifulSoup
 from bs4 import NavigableString, Tag
 import requests, json, re, time
 from database import SQLiteDB
-from relevance import job_matches_resume
+from relevance import job_matches_resume, extract_resume_search_terms
+import requests.utils
 
 
 class Scraper:
@@ -125,6 +126,66 @@ class Scraper:
             
         db.close()
         return True
+
+    def scrape_stepstone(self, user_id, resume_text):
+        """Scrape StepStone public keyword pages derived from the user's resume."""
+        search_terms = extract_resume_search_terms(resume_text)
+        if not search_terms:
+            print("[WARNING] No resume search terms found for StepStone scraping.")
+            return False
+
+        db = SQLiteDB('jobs.db')
+        found_any = False
+
+        for term in search_terms:
+            term_slug = re.sub(r"[^a-z0-9]+", "-", term.lower()).strip("-")
+            if not term_slug:
+                continue
+
+            urls = [
+                f"https://www.stepstone.de/jobs/{term_slug}",
+                f"https://www.stepstone.de/jobs/{term_slug}?page=2",
+            ]
+
+            for url in urls:
+                response = self.send_request(url)
+                if response is None:
+                    continue
+
+                soup = BeautifulSoup(response.text, 'html.parser')
+                offers = {}
+
+                for a in soup.find_all('a', href=True):
+                    href = a['href']
+                    if 'stellenangebote--' not in href or '-inline.html' not in href:
+                        continue
+                    if href.startswith('/'):
+                        link = f"https://www.stepstone.de{href}"
+                    elif href.startswith('http'):
+                        link = href
+                    else:
+                        continue
+
+                    title = a.get_text(' ', strip=True)
+                    if not title:
+                        continue
+                    offers[link] = title
+
+                if not offers:
+                    print(f"[WARNING] No StepStone offers found for {url}")
+                    continue
+
+                found_any = True
+                for offer_link, offer_title in offers.items():
+                    if not job_matches_resume(offer_title, resume_text):
+                        continue
+
+                    exists = db.fetchone("SELECT 1 FROM jobs WHERE link = ? AND user_id = ?", (offer_link, user_id))
+                    if not exists:
+                        db.execute("INSERT INTO jobs (title, link, user_id) VALUES (?,?,?)", (offer_title, offer_link, user_id))
+
+        db.close()
+        return found_any
     
     def extract_linkedin_details(self, link):
         """Extract job details from LinkedIn job posting.
@@ -165,6 +226,116 @@ class Scraper:
                 else:
                     lines.append(elem.get_text(separator=' ', strip=True))
         return '\n'.join(lines)
+
+
+    def scrape_linkedin(self, user_id, resume_text):
+        """Discover LinkedIn jobs using resume-driven keywords.
+
+        Tries a simple requests-based scrape first; if the page is dynamically
+        rendered or requests returns no results, falls back to Playwright
+        when available for a reliable render.
+        """
+        search_terms = extract_resume_search_terms(resume_text)
+        if not search_terms:
+            print("[WARNING] No resume search terms found for LinkedIn scraping.")
+            return False
+
+        db = SQLiteDB('jobs.db')
+        found_any = False
+
+        for term in search_terms:
+            query = requests.utils.quote(term)
+            url = f"https://www.linkedin.com/jobs/search?keywords={query}"
+
+            # Try fast requests-based fetch first
+            try:
+                resp = self.send_request(url)
+                if resp:
+                    soup = BeautifulSoup(resp.text, 'html.parser')
+                    links = []
+                    for a in soup.find_all('a', href=True):
+                        href = a['href']
+                        if 'linkedin.com/jobs/view' in href or 'linkedin.com/jobs/' in href:
+                            if href.startswith('/'):
+                                link = f"https://www.linkedin.com{href}"
+                            else:
+                                link = href
+                            title = a.get_text(' ', strip=True)
+                            if title:
+                                links.append((link, title))
+
+                    if links:
+                        found_any = True
+                        for offer_link, offer_title in links:
+                            if not job_matches_resume(offer_title, resume_text):
+                                continue
+                            exists = db.fetchone("SELECT 1 FROM jobs WHERE link = ? AND user_id = ?", (offer_link, user_id))
+                            if not exists:
+                                db.execute("INSERT INTO jobs (title, link, user_id) VALUES (?,?,?)", (offer_title, offer_link, user_id))
+                        continue
+            except Exception as exc:
+                print(f"[DEBUG] requests LinkedIn fetch failed for {url}: {exc}")
+
+            # Fallback to Playwright for reliable rendering
+            try:
+                ok = self.scrape_linkedin_playwright(term, db, user_id, resume_text)
+                if ok:
+                    found_any = True
+            except Exception as exc:
+                print(f"[WARNING] Playwright LinkedIn scrape failed for '{term}': {exc}")
+
+        db.close()
+        return found_any
+
+    def scrape_linkedin_playwright(self, term, db: SQLiteDB, user_id: str, resume_text: str):
+        """Use Playwright to render LinkedIn search pages and extract job links.
+
+        This function requires `playwright` to be installed and the browser
+        binaries to be set up (`playwright install`). If not available, it
+        raises ImportError which the caller will catch.
+        """
+        try:
+            from playwright.sync_api import sync_playwright
+        except Exception as exc:
+            raise ImportError("Playwright not installed or not available: " + str(exc))
+
+        query = requests.utils.quote(term)
+        search_url = f"https://www.linkedin.com/jobs/search?keywords={query}"
+
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(headless=True, args=["--no-sandbox"]) 
+            page = browser.new_page(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+            page.goto(search_url, timeout=30000)
+            # wait a bit for dynamic content
+            page.wait_for_timeout(2500)
+            content = page.content()
+            soup = BeautifulSoup(content, 'html.parser')
+
+            links = []
+            for a in soup.find_all('a', href=True):
+                href = a['href']
+                if 'linkedin.com/jobs/view' in href or 'linkedin.com/jobs/' in href:
+                    if href.startswith('/'):
+                        link = f"https://www.linkedin.com{href}"
+                    else:
+                        link = href
+                    title = a.get_text(' ', strip=True)
+                    if title:
+                        links.append((link, title))
+
+            if not links:
+                browser.close()
+                return False
+
+            for offer_link, offer_title in links:
+                if not job_matches_resume(offer_title, resume_text):
+                    continue
+                exists = db.fetchone("SELECT 1 FROM jobs WHERE link = ? AND user_id = ?", (offer_link, user_id))
+                if not exists:
+                    db.execute("INSERT INTO jobs (title, link, user_id) VALUES (?,?,?)", (offer_title, offer_link, user_id))
+
+            browser.close()
+            return True
     
 
     def convert_stepstone_link(self, deep_link):
