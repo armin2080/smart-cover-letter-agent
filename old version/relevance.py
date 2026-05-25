@@ -55,6 +55,44 @@ def extract_resume_terms(resume_text: str) -> tuple[set[str], set[str]]:
     return strong_terms, broad_terms
 
 
+def extract_resume_search_terms(resume_text: str, limit: int = 6) -> list[str]:
+    search_terms: list[str] = []
+    current_section = ""
+
+    def add_term(term: str):
+        normalized = normalize_text(term).strip()
+        if len(normalized) < 2:
+            return
+        if normalized in STOPWORDS:
+            return
+        if normalized not in search_terms:
+            search_terms.append(normalized)
+
+    for raw_line in (resume_text or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        lower = line.lower()
+        if lower in RELEVANT_SECTION_HEADINGS:
+            current_section = lower
+            continue
+
+        if current_section == "skills":
+            for part in re.split(r"[,;/•|\-]", line):
+                add_term(part)
+                if len(search_terms) >= limit:
+                    return search_terms[:limit]
+
+    if not search_terms:
+        for token in re.findall(r"[a-zA-Z][a-zA-Z0-9+#.-]{2,}", (resume_text or "").lower()):
+            add_term(token)
+            if len(search_terms) >= limit:
+                break
+
+    return search_terms[:limit]
+
+
 def job_matches_resume(job_text: str, resume_text: str, min_broad_matches: int = 1) -> bool:
     if not resume_text:
         return True
