@@ -74,6 +74,35 @@ class JobDatabase(SQLiteDB):
     def job_exists(self, link, user_id):
         return self.fetchone('SELECT 1 FROM jobs WHERE link = ? AND user_id = ?', (link, user_id)) is not None
 
+    def dedupe_jobs(self, user_id=None):
+        """Remove duplicate job rows. If user_id is provided, only dedupe for that user.
+
+        Dedupe key = (normalized_link_without_query, title_lower).
+        Returns the number of deleted rows.
+        """
+        if user_id:
+            rows = self.fetchall('SELECT id, link, title FROM jobs WHERE user_id = ?', (user_id,))
+        else:
+            rows = self.fetchall('SELECT id, link, title FROM jobs')
+
+        seen = {}
+        to_delete = []
+        for row in rows:
+            jid, link, title = row
+            norm_link = ''
+            if link:
+                norm_link = link.split('?')[0].split('#')[0].rstrip('/')
+            key = (norm_link, (title or '').strip().lower())
+            if key in seen:
+                to_delete.append(jid)
+            else:
+                seen[key] = jid
+
+        for jid in to_delete:
+            self.execute('DELETE FROM jobs WHERE id = ?', (jid,))
+
+        return len(to_delete)
+
 
 class UserDatabase(SQLiteDB):
     """Database for managing user profiles and application preferences."""
@@ -90,30 +119,20 @@ class UserDatabase(SQLiteDB):
                 username TEXT NOT NULL,
                 resume TEXT DEFAULT NULL,
                 expected_salary INTEGER DEFAULT NULL,
-                graduation_date TEXT DEFAULT NULL,
-                gmail_email TEXT DEFAULT NULL,
-                gmail_app_password TEXT DEFAULT NULL
+                graduation_date TEXT DEFAULT NULL
             )
         ''')
-        self.ensure_gmail_columns()
 
-    def ensure_gmail_columns(self):
-        columns = [row[1] for row in self.fetchall('PRAGMA table_info(users)')]
-        if 'gmail_email' not in columns:
-            self.execute('ALTER TABLE users ADD COLUMN gmail_email TEXT')
-        if 'gmail_app_password' not in columns:
-            self.execute('ALTER TABLE users ADD COLUMN gmail_app_password TEXT')
-
-    def add_user(self, name, username, resume=None, expected_salary=None, graduation_date=None, gmail_email=None, gmail_app_password=None):
+    def add_user(self, name, username, resume=None, expected_salary=None, graduation_date=None):
         self.execute(
-            'INSERT INTO users (name, username, resume, expected_salary, graduation_date, gmail_email, gmail_app_password) VALUES (?, ?, ?, ?, ?, ?, ?)',
-            (name, username, resume, expected_salary, graduation_date, gmail_email, gmail_app_password)
+            'INSERT INTO users (name, username, resume, expected_salary, graduation_date) VALUES (?, ?, ?, ?, ?)',
+            (name, username, resume, expected_salary, graduation_date)
         )
 
     def get_user(self, username):
         return self.fetchone('SELECT * FROM users WHERE username = ?', (username,))
     
-    def update_user(self,username, resume=None, expected_salary=None, graduation_date=None, gmail_email=None, gmail_app_password=None):
+    def update_user(self,username, resume=None, expected_salary=None, graduation_date=None):
         updates = []
         params = []
         if resume:
@@ -125,12 +144,6 @@ class UserDatabase(SQLiteDB):
         if graduation_date:
             updates.append("graduation_date = ?")
             params.append(graduation_date)
-        if gmail_email:
-            updates.append("gmail_email = ?")
-            params.append(gmail_email)
-        if gmail_app_password:
-            updates.append("gmail_app_password = ?")
-            params.append(gmail_app_password)
 
         if updates:
             query = f"UPDATE users SET {', '.join(updates)} WHERE username = ?"
