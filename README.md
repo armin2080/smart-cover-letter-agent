@@ -1,8 +1,23 @@
-# Smart Cover Letter Agent - Backend API
+# Smart Cover Letter Agent — Personalized cover letters, faster
 
-Django REST API for the Smart Cover Letter application.
+Turn any resume and job posting into a polished, tailored cover letter in seconds. Smart Cover Letter Agent combines your profile data with job details and AI-powered text generation so you can apply more, faster, and get better responses.
 
-## Setup
+Why it helps:
+- Save hours per application with instantly generated, role-specific cover letters.
+- Write with confidence: professional tone, tailored highlights, and recruiter-friendly structure.
+- Keep control: customize output, reuse templates, or fine-tune content per job.
+
+Highlights:
+- AI-powered personalization from your profile and job descriptions
+- API-first backend for integration with UIs, pipelines, and automation
+- Extensible: swap AI providers (Gemini or others) and add scraping or ATS integrations
+
+Tech stack:
+- Backend: Django 6 + Django REST Framework
+- Frontend: Vite + React (see `front/SMART-COVER-LETTER-AGENT-FRONTEND`)
+- Data: SQLite for local development (can be swapped for production DB)
+
+## Quick Start
 
 1. Install dependencies:
 ```bash
