@@ -927,6 +927,12 @@ async def announce_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⛔ This command is only available to the bot admin.")
         return ConversationHandler.END
     
+    # Store admin's chat_id so they receive the announcement too
+    try:
+        user_db.set_chat_id(get_username(update), update.effective_chat.id)
+    except Exception:
+        pass
+    
     await update.message.reply_text(
         "📢 <b>Send the announcement message</b>\n\n"
         "Type the message you want to send to all registered users.\n"
@@ -1002,14 +1008,11 @@ async def announce_confirm_handler(update: Update, context: ContextTypes.DEFAULT
                     text=f"📢 <b>Announcement</b>\n\n{message_text}",
                     parse_mode='HTML'
                 )
+                sent += 1
             else:
-                # Fallback: try sending by @username
-                await context.bot.send_message(
-                    chat_id=f"@{username}",
-                    text=f"📢 <b>Announcement</b>\n\n{message_text}",
-                    parse_mode='HTML'
-                )
-            sent += 1
+                # Can't reach users without a stored chat_id
+                failed += 1
+                errors.append(f"{username}: no chat_id (user must send a command first)")
         except Exception as e:
             failed += 1
             errors.append(f"{username}: {e}")
