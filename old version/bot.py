@@ -17,6 +17,7 @@ with open(config_path, "r") as config_file:
 
 # --- CONFIGURATION ---
 BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN') or config.get('bot_token')
+ADMIN_ID = config.get('user_id')  # Telegram user ID of the bot admin
 
 # --- SCRAPER AND DATABASE SETUP ---
 scraper = Scraper()
@@ -108,6 +109,25 @@ PDF_TEXT = range(1)
   GRADUATION_DATE,
 ) = range(1, 15)
 
+# --- EDIT CONVERSATION STATES ---
+(
+    EDIT_CHOICE,
+    EDIT_RESUME_NAME,
+    EDIT_RESUME_TITLE,
+    EDIT_RESUME_PHONE,
+    EDIT_RESUME_EMAIL,
+    EDIT_RESUME_LOCATION,
+    EDIT_RESUME_PORTFOLIO,
+    EDIT_RESUME_SKILLS,
+    EDIT_RESUME_EDUCATION,
+    EDIT_RESUME_LANGUAGES,
+    EDIT_RESUME_EXPERIENCE,
+    EDIT_RESUME_PROJECTS,
+    EDIT_RESUME_CERTS,
+    EDIT_EXPECTED_SALARY,
+    EDIT_GRADUATION_DATE,
+) = range(15, 30)
+
 
 def get_username(update: Update):
   return update.effective_user.username or str(update.effective_user.id)
@@ -119,6 +139,12 @@ async def require_registered(update: Update):
   if not user:
     await update.message.reply_text("Please register first with /start.")
     return None
+  # Store chat_id for this user so admin announcements can reach them
+  try:
+    chat_id = update.effective_chat.id
+    user_db.set_chat_id(username, chat_id)
+  except Exception:
+    pass
   # Migrate any jobs stored under the numeric Telegram id to the canonical username
   try:
     numeric_id = str(update.effective_user.id)
@@ -374,25 +400,14 @@ async def get_graduation_date(update: Update, context: ContextTypes.DEFAULT_TYPE
     expected_salary=context.user_data['expected_salary'],
     graduation_date=context.user_data['graduation_date']
   )
+  # Save individual resume fields
+  resume_fields = {field: context.user_data.get(field) for field in user_db.RESUME_FIELDS}
+  user_db.save_resume_fields(username, resume_fields)
   await update.message.reply_text("Thank you! Your data has been saved. You can now use the bot. Use /help to see available commands.")
   return ConversationHandler.END
 
 
-# --- /info COMMAND HANDLER ---
-async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-  username = get_username(update)
-  user = user_db.get_user(username)
-  
-  if not user:
-    await update.message.reply_text("You are not registered yet. Please use /start to register first.")
-    return
-
-  info_text = (
-    f"Resume:\n {user[3]}\n\n\n\n\n"
-    f"Expected Salary: {user[4]} EUR/hour\n\n"
-    f"Graduation Date: {user[5]}"
-  )
-  await update.message.reply_text(info_text)
+# (/info is handled by the edit ConversationHandler — see info_command)
 
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
@@ -406,13 +421,20 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = (
         "Here are the available commands:\n"
         "/start - Start the bot and register your information.\n"
-        "/info - Get your registered information (resume, expected salary, graduation date).\n"
-         "/list - Show your saved jobs and choose actions.\n"
-    "/pdf - Convert text to PDF.\n"
-    "/pdf_last - Legacy fallback for the last generated cover letter.\n"
+        "/info - View your profile and edit it with the ✏️ button.\n"
+        "/filter - Set your preferred job types (full-time, part-time, working student, etc.).\n"
+        "/list - Show your saved jobs (filtered by your preferences).\n"
         "/scrape - Manually trigger public job scraping from StepStone and Stellenwerk.\n"
-         "Job links are no longer auto-processed. Use /list and the buttons on a saved job."
+        "/pdf - Convert text to PDF.\n"
+        "/pdf_last - Legacy fallback for the last generated cover letter.\n"
+        "Job links are no longer auto-processed. Use /list and the buttons on a saved job."
     )
+    if is_admin(update):
+        help_text += (
+            "\n\n👑 <b>Admin commands:</b>\n"
+            "/announce - Send an announcement to all registered users.\n"
+            "/stats - List all registered users."
+        )
     await update.message.reply_text(help_text)
 
 # --- SCRAPE JOB FUNCTION ---
@@ -446,29 +468,51 @@ async def list_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
   if not user:
     return
   username = get_username(update)
-  rows = job_db.fetchall('SELECT id, title, link, checked FROM jobs WHERE user_id = ? AND checked = 0 ORDER BY id DESC', (username,))
+  
+  # Get user's preferred job types
+  preferred_types = user_db.get_preferred_types(username)
+  
+  # Fetch jobs matching preferred types
+  rows = job_db.fetchall(
+      'SELECT id, title, link, checked, employment_type FROM jobs WHERE user_id = ? AND checked = 0 ORDER BY id DESC',
+      (username,)
+  )
+  
+  # Filter by preferred employment types
+  if preferred_types:
+      rows = [r for r in rows if r[4] is None or r[4] in preferred_types]
+  
   if not rows:
-    await update.message.reply_text("You have no saved jobs. Run /scrape to discover jobs.")
+    preferred_labels = ', '.join(preferred_types) if preferred_types else 'any'
+    await update.message.reply_text(
+        f"No saved jobs match your filter ({preferred_labels}). "
+        f"Run /scrape to discover jobs or use /filter to change your preferences."
+    )
     return
 
   # Group by domain/source and show up to N per source
   per_source_limit = 5
   grouped = {}
-  for jid, title, link, checked in rows:
+  for jid, title, link, checked, emp_type in rows:
     src = get_source_label(link)
-    grouped.setdefault(src, []).append((jid, title, link))
+    grouped.setdefault(src, []).append((jid, title, link, emp_type))
 
   keyboard = []
   for src in sorted(grouped.keys()):
-    for jid, title, link in grouped[src][:per_source_limit]:
-      label = f"[{src}] {title}"
+    for jid, title, link, emp_type in grouped[src][:per_source_limit]:
+      badge = {
+          'fulltime': '👔', 'parttime': '🕐', 'workingstudent': '🎓',
+          'internship': '📋', 'minijob': '💼',
+      }.get(emp_type, '📌') if emp_type else '📌'
+      label = f"{badge} [{src}] {title}"
       keyboard.append([InlineKeyboardButton(label, callback_data=f"view:{jid}")])
 
   reply_markup = InlineKeyboardMarkup(keyboard)
   total = len(rows)
   shown = sum(min(len(v), per_source_limit) for v in grouped.values())
-  note = f"Showing {shown} of {total} (up to {per_source_limit} per source)."
-  await update.message.reply_text(f"Select a job to get the link: {note}", reply_markup=reply_markup)
+  filter_note = f"Filter: {', '.join(preferred_types)}" if preferred_types else "No filter"
+  note = f"Showing {shown} of {total} (up to {per_source_limit} per source). {filter_note}"
+  await update.message.reply_text(f"Select a job to get the link:\n{note}", reply_markup=reply_markup)
 
 # --- CALLBACK FOR BUTTON PRESS ---
 async def job_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -615,6 +659,427 @@ async def pdf_last_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
   filename = f"cover_letter_{timestamp}.pdf"
   await update.message.reply_document(document=InputFile(pdf_buffer, filename=filename))
 
+# --- /info COMMAND HANDLER (with inline edit button) ---
+async def info_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show profile with an ✏️ Edit Profile button."""
+    user = await require_registered(update)
+    if not user:
+        return ConversationHandler.END
+    
+    resume_text = user[3] or "Not set yet."
+    salary = user[4] or "Not set"
+    grad_date = user[5] or "Not set"
+    
+    info_text = (
+        f"📋 <b>Your Profile</b>\n\n"
+        f"<b>Resume:</b>\n{resume_text}\n\n"
+        f"<b>Expected Salary:</b> {salary} EUR/hour\n"
+        f"<b>Graduation Date:</b> {grad_date}"
+    )
+    
+    keyboard = [[InlineKeyboardButton("✏️ Edit Profile", callback_data="edit_field:start")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(info_text, reply_markup=reply_markup, parse_mode='HTML')
+    return EDIT_CHOICE
+
+
+async def edit_choice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle the field selection from inline keyboard."""
+    query = update.callback_query
+    await query.answer()
+    
+    data = query.data
+    if data == "edit_field:cancel":
+        await query.edit_message_text("Edit cancelled.")
+        return ConversationHandler.END
+    
+    if data == "edit_field:start":
+        # User clicked "Edit Profile" from /info — show field selection keyboard
+        keyboard = [
+            [InlineKeyboardButton("📝 Full Name", callback_data="edit_field:resume_name")],
+            [InlineKeyboardButton("📝 Job Title", callback_data="edit_field:resume_title")],
+            [InlineKeyboardButton("📝 Phone", callback_data="edit_field:resume_phone")],
+            [InlineKeyboardButton("📝 Email", callback_data="edit_field:resume_email")],
+            [InlineKeyboardButton("📝 Location", callback_data="edit_field:resume_location")],
+            [InlineKeyboardButton("📝 Portfolio", callback_data="edit_field:resume_portfolio")],
+            [InlineKeyboardButton("📝 Skills", callback_data="edit_field:resume_skills")],
+            [InlineKeyboardButton("📝 Education", callback_data="edit_field:resume_education")],
+            [InlineKeyboardButton("📝 Languages", callback_data="edit_field:resume_languages")],
+            [InlineKeyboardButton("📝 Experience", callback_data="edit_field:resume_experience")],
+            [InlineKeyboardButton("📝 Projects", callback_data="edit_field:resume_projects")],
+            [InlineKeyboardButton("📝 Certificates", callback_data="edit_field:resume_certs")],
+            [InlineKeyboardButton("💰 Expected Salary", callback_data="edit_field:expected_salary")],
+            [InlineKeyboardButton("📅 Graduation Date", callback_data="edit_field:graduation_date")],
+            [InlineKeyboardButton("❌ Cancel", callback_data="edit_field:cancel")],
+        ]
+        await query.edit_message_text(
+            "Select a field to edit:",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        return EDIT_CHOICE
+    
+    field = data.split(":", 1)[1] if ":" in data else None
+    if not field:
+        await query.edit_message_text("Invalid selection.")
+        return ConversationHandler.END
+    
+    context.user_data['edit_field'] = field
+    
+    # Get current value
+    username = get_username(update)
+    
+    if field in user_db.RESUME_FIELDS:
+        resume_fields = user_db.get_resume_fields(username)
+        current_value = resume_fields.get(field, "") if resume_fields else ""
+    elif field == 'expected_salary':
+        user = user_db.get_user(username)
+        current_value = str(user[4]) if user and user[4] else ""
+    elif field == 'graduation_date':
+        user = user_db.get_user(username)
+        current_value = str(user[5]) if user and user[5] else ""
+    else:
+        current_value = ""
+    
+    label = user_db.RESUME_FIELD_LABELS.get(field, field)
+    current_display = current_value if current_value else "Not set"
+    
+    await query.edit_message_text(
+        f"Editing: <b>{label}</b>\n\n"
+        f"Current value: <code>{current_display}</code>\n\n"
+        f"Please send the new value (or send /cancel to abort):",
+        parse_mode='HTML'
+    )
+    
+    # Map field to the right state
+    field_to_state = {
+        'resume_name': EDIT_RESUME_NAME,
+        'resume_title': EDIT_RESUME_TITLE,
+        'resume_phone': EDIT_RESUME_PHONE,
+        'resume_email': EDIT_RESUME_EMAIL,
+        'resume_location': EDIT_RESUME_LOCATION,
+        'resume_portfolio': EDIT_RESUME_PORTFOLIO,
+        'resume_skills': EDIT_RESUME_SKILLS,
+        'resume_education': EDIT_RESUME_EDUCATION,
+        'resume_languages': EDIT_RESUME_LANGUAGES,
+        'resume_experience': EDIT_RESUME_EXPERIENCE,
+        'resume_projects': EDIT_RESUME_PROJECTS,
+        'resume_certs': EDIT_RESUME_CERTS,
+        'expected_salary': EDIT_EXPECTED_SALARY,
+        'graduation_date': EDIT_GRADUATION_DATE,
+    }
+    return field_to_state.get(field, EDIT_CHOICE)
+
+
+async def handle_edit_text_field(update: Update, context: ContextTypes.DEFAULT_TYPE, field: str):
+    """Generic handler for editing a text resume field."""
+    new_value = update.message.text.strip() if update.message.text else ""
+    if not new_value:
+        await update.message.reply_text("Value cannot be empty. Please send a non-empty value or use /cancel.")
+        return None  # stay in same state
+    
+    username = get_username(update)
+    user_db.update_resume_field(username, field, new_value)
+    
+    # Rebuild the full resume text
+    resume_fields = user_db.get_resume_fields(username)
+    if resume_fields:
+        # Build a dict with all fields for build_resume_text
+        field_data = {}
+        for f in user_db.RESUME_FIELDS:
+            field_data[f] = resume_fields.get(f) or ""
+        # Add any non-resume fields from the user record
+        user = user_db.get_user(username)
+        field_data['expected_salary'] = user[4] if user else None
+        field_data['graduation_date'] = user[5] if user else None
+        new_resume = build_resume_text(field_data)
+        user_db.update_user(username, resume=new_resume)
+    
+    label = user_db.RESUME_FIELD_LABELS.get(field, field)
+    await update.message.reply_text(f"✅ <b>{label}</b> updated successfully!", parse_mode='HTML')
+    return ConversationHandler.END
+
+
+async def edit_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await handle_edit_text_field(update, context, 'resume_name')
+
+async def edit_title(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await handle_edit_text_field(update, context, 'resume_title')
+
+async def edit_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await handle_edit_text_field(update, context, 'resume_phone')
+
+async def edit_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await handle_edit_text_field(update, context, 'resume_email')
+
+async def edit_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await handle_edit_text_field(update, context, 'resume_location')
+
+async def edit_portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await handle_edit_text_field(update, context, 'resume_portfolio')
+
+async def edit_skills(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await handle_edit_text_field(update, context, 'resume_skills')
+
+async def edit_education(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await handle_edit_text_field(update, context, 'resume_education')
+
+async def edit_languages(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await handle_edit_text_field(update, context, 'resume_languages')
+
+async def edit_experience(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await handle_edit_text_field(update, context, 'resume_experience')
+
+async def edit_projects(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await handle_edit_text_field(update, context, 'resume_projects')
+
+async def edit_certs(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await handle_edit_text_field(update, context, 'resume_certs')
+
+
+async def edit_salary(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle editing expected salary."""
+    salary_text = update.message.text.strip() if update.message.text else ""
+    try:
+        salary = int(salary_text.replace(",", "").replace(".", ""))
+        if salary <= 0:
+            raise ValueError("Salary must be a positive number.")
+    except Exception:
+        await update.message.reply_text("Please enter a valid number for your expected salary (e.g. 15).")
+        return EDIT_EXPECTED_SALARY
+    
+    username = get_username(update)
+    user_db.update_resume_field(username, 'expected_salary', salary)
+    user_db.update_user(username, expected_salary=salary)
+    
+    await update.message.reply_text(f"✅ <b>Expected Salary</b> updated to {salary} EUR/hour!", parse_mode='HTML')
+    return ConversationHandler.END
+
+
+async def edit_graduation(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle editing graduation date."""
+    date_text = update.message.text.strip() if update.message.text else ""
+    try:
+        grad_date = datetime.datetime.strptime(date_text, "%Y.%m.%d").date()
+    except Exception:
+        await update.message.reply_text("Please enter the date in the format YYYY.MM.DD (e.g. 2026.07.01).")
+        return EDIT_GRADUATION_DATE
+    
+    username = get_username(update)
+    user_db.update_resume_field(username, 'graduation_date', str(grad_date))
+    user_db.update_user(username, graduation_date=str(grad_date))
+    
+    await update.message.reply_text(f"✅ <b>Graduation Date</b> updated to {grad_date}!", parse_mode='HTML')
+    return ConversationHandler.END
+
+
+async def edit_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Cancel the edit conversation."""
+    await update.message.reply_text("Edit cancelled.")
+    return ConversationHandler.END
+
+
+async def edit_choice_timeout(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Fallback for unexpected messages during edit choice."""
+    await update.message.reply_text("Please select a field from the keyboard above or use /cancel.")
+    return EDIT_CHOICE
+
+# --- ADMIN STATS ---
+async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show registered users (admin only)."""
+    if not is_admin(update):
+        await update.message.reply_text("⛔ This command is only available to the bot admin.")
+        return
+    
+    rows = user_db.fetchall('SELECT name, username FROM users ORDER BY name')
+    if not rows:
+        await update.message.reply_text("No registered users yet.")
+        return
+    
+    total = len(rows)
+    lines = [f"👥 <b>Registered Users ({total})</b>\n"]
+    for i, (name, username) in enumerate(rows, 1):
+        display_name = (name or '').strip() or '—'
+        lines.append(f"{i}. {display_name} (@{username})")
+    
+    # Send in chunks if too long (Telegram limit ~4000 chars)
+    text = '\n'.join(lines)
+    if len(text) <= 4000:
+        await update.message.reply_text(text, parse_mode='HTML')
+    else:
+        # Split into multiple messages
+        for chunk in [text[i:i+3500] for i in range(0, len(text), 3500)]:
+            await update.message.reply_text(chunk, parse_mode='HTML')
+
+
+# --- ADMIN ANNOUNCEMENT ---
+ANNOUNCE_TEXT, ANNOUNCE_CONFIRM = range(30, 32)
+
+
+def is_admin(update: Update) -> bool:
+    """Check if the user is the bot admin."""
+    user_id = update.effective_user.id
+    return user_id == ADMIN_ID
+
+
+async def announce_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Start the announcement flow (admin only)."""
+    if not is_admin(update):
+        await update.message.reply_text("⛔ This command is only available to the bot admin.")
+        return ConversationHandler.END
+    
+    await update.message.reply_text(
+        "📢 <b>Send the announcement message</b>\n\n"
+        "Type the message you want to send to all registered users.\n"
+        "Send /cancel to abort.",
+        parse_mode='HTML'
+    )
+    return ANNOUNCE_TEXT
+
+
+async def announce_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Cancel the announcement flow."""
+    await update.message.reply_text("Announcement cancelled.")
+    return ConversationHandler.END
+
+
+async def announce_send(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Save the text and show a preview with confirm/cancel buttons."""
+    message_text = update.message.text.strip() if update.message.text else ""
+    if not message_text:
+        await update.message.reply_text("Message cannot be empty. Please type your announcement.")
+        return ANNOUNCE_TEXT
+    
+    # Store the text for later use
+    context.user_data['announce_text'] = message_text
+    
+    # Count recipients
+    rows = user_db.fetchall('SELECT username, chat_id FROM users WHERE chat_id IS NOT NULL')
+    recipient_count = len(rows)
+    
+    preview = (
+        f"📢 <b>Announcement Preview</b>\n\n"
+        f"{message_text}\n\n"
+        f"━━━━━━━━━━━━━━━\n"
+        f"Will be sent to <b>{recipient_count}</b> user(s)."
+    )
+    
+    keyboard = [
+        [
+            InlineKeyboardButton("✅ Send", callback_data="announce_confirm:yes"),
+            InlineKeyboardButton("❌ Cancel", callback_data="announce_confirm:no"),
+        ]
+    ]
+    
+    await update.message.reply_text(preview, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
+    return ANNOUNCE_CONFIRM
+
+
+async def announce_confirm_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle the Send/Cancel decision."""
+    query = update.callback_query
+    await query.answer()
+    
+    if query.data == "announce_confirm:no":
+        await query.edit_message_text("Announcement cancelled.")
+        return ConversationHandler.END
+    
+    # Proceed to send
+    message_text = context.user_data.get('announce_text', '')
+    await query.edit_message_text("📤 Sending announcement to all users...")
+    
+    rows = user_db.fetchall('SELECT username, chat_id FROM users WHERE chat_id IS NOT NULL')
+    sent = 0
+    failed = 0
+    errors = []
+    
+    for username, chat_id in rows:
+        try:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=f"📢 <b>Announcement</b>\n\n{message_text}",
+                parse_mode='HTML'
+            )
+            sent += 1
+        except Exception as e:
+            failed += 1
+            errors.append(f"{username}: {e}")
+    
+    report = (
+        f"📊 <b>Announcement Results</b>\n\n"
+        f"Total users with chat_id: {len(rows)}\n"
+        f"✅ Sent: {sent}\n"
+        f"❌ Failed: {failed}"
+    )
+    if errors:
+        report += f"\n\nFirst errors:\n" + "\n".join(str(e) for e in errors[:5])
+    
+    await context.bot.send_message(chat_id=query.from_user.id, text=report, parse_mode='HTML')
+    return ConversationHandler.END
+
+
+# --- FILTER COMMAND ---
+async def filter_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show current job type filter and allow toggling types."""
+    user = await require_registered(update)
+    if not user:
+        return
+    username = get_username(update)
+    preferred = user_db.get_preferred_types(username)
+    
+    text = "🔍 <b>Job Type Filter</b>\n\nSelect which job types you want to see:\n"
+    keyboard = []
+    for t in job_db.EMPLOYMENT_TYPES:
+        label = {
+            'fulltime': '👔 Full-Time',
+            'parttime': '🕐 Part-Time',
+            'workingstudent': '🎓 Working Student',
+            'internship': '📋 Internship',
+            'minijob': '💼 Minijob',
+        }.get(t, t)
+        checked = "✅" if t in preferred else "⬜"
+        keyboard.append([InlineKeyboardButton(f"{checked} {label}", callback_data=f"filter_toggle:{t}")])
+    keyboard.append([InlineKeyboardButton("✅ Done", callback_data="filter_done")])
+    
+    await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
+
+
+async def filter_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle toggle/done on filter keyboard."""
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    username = query.from_user.username or str(query.from_user.id)
+    
+    if data == "filter_done":
+        await query.edit_message_text("✅ Filter updated!")
+        return
+    
+    if data.startswith("filter_toggle:"):
+        emp_type = data.split(":", 1)[1]
+        preferred = user_db.get_preferred_types(username)
+        if emp_type in preferred:
+            preferred = [t for t in preferred if t != emp_type]
+        else:
+            preferred.append(emp_type)
+        user_db.set_preferred_types(username, preferred)
+        
+        # Rebuild keyboard with updated toggles
+        text = "🔍 <b>Job Type Filter</b>\n\nSelect which job types you want to see:\n"
+        keyboard = []
+        for t in job_db.EMPLOYMENT_TYPES:
+            label = {
+                'fulltime': '👔 Full-Time',
+                'parttime': '🕐 Part-Time',
+                'workingstudent': '🎓 Working Student',
+                'internship': '📋 Internship',
+                'minijob': '💼 Minijob',
+            }.get(t, t)
+            checked = "✅" if t in preferred else "⬜"
+            keyboard.append([InlineKeyboardButton(f"{checked} {label}", callback_data=f"filter_toggle:{t}")])
+        keyboard.append([InlineKeyboardButton("✅ Done", callback_data="filter_done")])
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
+
+
 # --- MAIN FUNCTION ---
 def main():
   missing = []
@@ -659,17 +1124,55 @@ def main():
     fallbacks=[],
   )
 
+  # --- EDIT CONVERSATION HANDLER (entry via /info button) ---
+  edit_conv_handler = ConversationHandler(
+    entry_points=[CommandHandler('info', info_command)],
+    states={
+      EDIT_CHOICE: [CallbackQueryHandler(edit_choice_handler, pattern="^edit_field:")],
+      EDIT_RESUME_NAME: [MessageHandler(filters.TEXT & (~filters.COMMAND), edit_name)],
+      EDIT_RESUME_TITLE: [MessageHandler(filters.TEXT & (~filters.COMMAND), edit_title)],
+      EDIT_RESUME_PHONE: [MessageHandler(filters.TEXT & (~filters.COMMAND), edit_phone)],
+      EDIT_RESUME_EMAIL: [MessageHandler(filters.TEXT & (~filters.COMMAND), edit_email)],
+      EDIT_RESUME_LOCATION: [MessageHandler(filters.TEXT & (~filters.COMMAND), edit_location)],
+      EDIT_RESUME_PORTFOLIO: [MessageHandler(filters.TEXT & (~filters.COMMAND), edit_portfolio)],
+      EDIT_RESUME_SKILLS: [MessageHandler(filters.TEXT & (~filters.COMMAND), edit_skills)],
+      EDIT_RESUME_EDUCATION: [MessageHandler(filters.TEXT & (~filters.COMMAND), edit_education)],
+      EDIT_RESUME_LANGUAGES: [MessageHandler(filters.TEXT & (~filters.COMMAND), edit_languages)],
+      EDIT_RESUME_EXPERIENCE: [MessageHandler(filters.TEXT & (~filters.COMMAND), edit_experience)],
+      EDIT_RESUME_PROJECTS: [MessageHandler(filters.TEXT & (~filters.COMMAND), edit_projects)],
+      EDIT_RESUME_CERTS: [MessageHandler(filters.TEXT & (~filters.COMMAND), edit_certs)],
+      EDIT_EXPECTED_SALARY: [MessageHandler(filters.TEXT & (~filters.COMMAND), edit_salary)],
+      EDIT_GRADUATION_DATE: [MessageHandler(filters.TEXT & (~filters.COMMAND), edit_graduation)],
+    },
+    fallbacks=[CommandHandler('cancel', edit_cancel)],
+  )
+
+  # --- ANNOUNCEMENT CONVERSATION HANDLER (admin only) ---
+  announce_conv_handler = ConversationHandler(
+    entry_points=[CommandHandler('announce', announce_command)],
+    states={
+      ANNOUNCE_TEXT: [MessageHandler(filters.TEXT & (~filters.COMMAND), announce_send)],
+      ANNOUNCE_CONFIRM: [CallbackQueryHandler(announce_confirm_handler, pattern="^announce_confirm:")],
+    },
+    fallbacks=[CommandHandler('cancel', announce_cancel)],
+  )
+
   # Conversation handlers first to avoid URL handler hijacking registration replies.
+  application.add_handler(announce_conv_handler)
   application.add_handler(registration_conv_handler)
+  application.add_handler(edit_conv_handler)
   application.add_handler(pdf_conv_handler)
   application.add_handler(CommandHandler('list', list_handler))
   application.add_handler(CommandHandler('help', help_command))
-  application.add_handler(CommandHandler('info', info_command))
+  # /info is handled by edit_conv_handler above
+  application.add_handler(CommandHandler('stats', stats_command))
+  application.add_handler(CommandHandler('filter', filter_command))
   application.add_handler(CommandHandler('scrape', scrape_handler))
   application.add_handler(CommandHandler('claimjobs', claim_jobs))
   application.add_handler(CommandHandler('dedupe', dedupe_command))
   application.add_handler(CommandHandler('pdf_last', pdf_last_command))
 
+  application.add_handler(CallbackQueryHandler(filter_button_handler, pattern="^filter_"))
   application.add_handler(CallbackQueryHandler(job_button_handler))
   application.add_error_handler(error_handler)
 

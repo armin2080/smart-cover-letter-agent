@@ -2,7 +2,8 @@ import json
 import os
 import requests
 
-with open('config.json', 'r', encoding='utf-8') as f:
+config_path = os.path.join(os.path.dirname(__file__), "config.json")
+with open(config_path, 'r', encoding='utf-8') as f:
     config_data = json.load(f)
 
 # Prefer a dedicated Groq key; fall back to api_key for compatibility.
