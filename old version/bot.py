@@ -952,15 +952,17 @@ async def announce_send(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Store the text for later use
     context.user_data['announce_text'] = message_text
     
-    # Count recipients
-    rows = user_db.fetchall('SELECT username, chat_id FROM users WHERE chat_id IS NOT NULL')
-    recipient_count = len(rows)
+    # Count all users (we'll try sending to everyone, with/without chat_id)
+    all_users = user_db.fetchall('SELECT username, chat_id FROM users')
+    with_chat = sum(1 for _, cid in all_users if cid is not None)
+    without_chat = sum(1 for _, cid in all_users if cid is None)
     
     preview = (
         f"📢 <b>Announcement Preview</b>\n\n"
         f"{message_text}\n\n"
         f"━━━━━━━━━━━━━━━\n"
-        f"Will be sent to <b>{recipient_count}</b> user(s)."
+        f"Total users: <b>{len(all_users)}</b>\n"
+        f"With chat_id: {with_chat} | Without: {without_chat}"
     )
     
     keyboard = [
@@ -987,18 +989,26 @@ async def announce_confirm_handler(update: Update, context: ContextTypes.DEFAULT
     message_text = context.user_data.get('announce_text', '')
     await query.edit_message_text("📤 Sending announcement to all users...")
     
-    rows = user_db.fetchall('SELECT username, chat_id FROM users WHERE chat_id IS NOT NULL')
+    all_users = user_db.fetchall('SELECT username, chat_id FROM users')
     sent = 0
     failed = 0
     errors = []
     
-    for username, chat_id in rows:
+    for username, chat_id in all_users:
         try:
-            await context.bot.send_message(
-                chat_id=chat_id,
-                text=f"📢 <b>Announcement</b>\n\n{message_text}",
-                parse_mode='HTML'
-            )
+            if chat_id:
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=f"📢 <b>Announcement</b>\n\n{message_text}",
+                    parse_mode='HTML'
+                )
+            else:
+                # Fallback: try sending by @username
+                await context.bot.send_message(
+                    chat_id=f"@{username}",
+                    text=f"📢 <b>Announcement</b>\n\n{message_text}",
+                    parse_mode='HTML'
+                )
             sent += 1
         except Exception as e:
             failed += 1
@@ -1006,7 +1016,7 @@ async def announce_confirm_handler(update: Update, context: ContextTypes.DEFAULT
     
     report = (
         f"📊 <b>Announcement Results</b>\n\n"
-        f"Total users with chat_id: {len(rows)}\n"
+        f"Total users: {len(all_users)}\n"
         f"✅ Sent: {sent}\n"
         f"❌ Failed: {failed}"
     )
