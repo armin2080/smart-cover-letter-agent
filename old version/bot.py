@@ -435,7 +435,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "/announce - Send an announcement to all registered users.\n"
             "/stats - List all registered users."
         )
-    await update.message.reply_text(help_text)
+    await update.message.reply_text(help_text, parse_mode='HTML')
 
 # --- SCRAPE JOB FUNCTION ---
 async def scrape_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
