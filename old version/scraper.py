@@ -6,6 +6,25 @@ from relevance import job_matches_resume, extract_resume_search_terms
 import requests.utils
 
 
+def detect_employment_type(title: str) -> str:
+    """Detect employment type from a job title."""
+    title_lower = (title or '').lower()
+    if 'werkstudent' in title_lower or 'working student' in title_lower:
+        return 'workingstudent'
+    if 'praktikum' in title_lower or 'praktikant' in title_lower or 'internship' in title_lower or 'intern' in title_lower:
+        return 'internship'
+    if 'minijob' in title_lower or 'mini job' in title_lower or 'aushilfe' in title_lower:
+        return 'minijob'
+    if 'teilzeit' in title_lower or 'part time' in title_lower or 'part-time' in title_lower or 'parttime' in title_lower:
+        return 'parttime'
+    if 'vollzeit' in title_lower or 'full time' in title_lower or 'full-time' in title_lower or 'fulltime' in title_lower:
+        return 'fulltime'
+    # Default: if title contains student-friendly keywords, assume working student
+    if any(kw in title_lower for kw in ['student', 'studierende', 'studium', 'werks']):
+        return 'workingstudent'
+    return 'fulltime'  # default
+
+
 class Scraper:
     """Web scraper for extracting job details from multiple job platforms."""
     
@@ -119,10 +138,11 @@ class Scraper:
                 if not job_matches_resume(offer_title, resume_text):
                     continue
 
+                emp_type = detect_employment_type(offer_title)
                 # Check if a row with the same link exists
                 exists = db.fetchone("SELECT 1 FROM jobs WHERE link = ? AND user_id = ?", (offer_link, user_id))
                 if not exists:
-                    db.execute("INSERT INTO jobs (title, link, user_id) VALUES (?,?,?)", (offer_title, offer_link, user_id))
+                    db.execute("INSERT INTO jobs (title, link, user_id, employment_type) VALUES (?,?,?,?)", (offer_title, offer_link, user_id, emp_type))
             
         db.close()
         return True
@@ -180,9 +200,10 @@ class Scraper:
                     if not job_matches_resume(offer_title, resume_text):
                         continue
 
+                    emp_type = detect_employment_type(offer_title)
                     exists = db.fetchone("SELECT 1 FROM jobs WHERE link = ? AND user_id = ?", (offer_link, user_id))
                     if not exists:
-                        db.execute("INSERT INTO jobs (title, link, user_id) VALUES (?,?,?)", (offer_title, offer_link, user_id))
+                        db.execute("INSERT INTO jobs (title, link, user_id, employment_type) VALUES (?,?,?,?)", (offer_title, offer_link, user_id, emp_type))
 
         db.close()
         return found_any
@@ -269,9 +290,10 @@ class Scraper:
                         for offer_link, offer_title in links:
                             if not job_matches_resume(offer_title, resume_text):
                                 continue
+                            emp_type = detect_employment_type(offer_title)
                             exists = db.fetchone("SELECT 1 FROM jobs WHERE link = ? AND user_id = ?", (offer_link, user_id))
                             if not exists:
-                                db.execute("INSERT INTO jobs (title, link, user_id) VALUES (?,?,?)", (offer_title, offer_link, user_id))
+                                db.execute("INSERT INTO jobs (title, link, user_id, employment_type) VALUES (?,?,?,?)", (offer_title, offer_link, user_id, emp_type))
                         continue
             except Exception as exc:
                 print(f"[DEBUG] requests LinkedIn fetch failed for {url}: {exc}")
@@ -330,9 +352,10 @@ class Scraper:
             for offer_link, offer_title in links:
                 if not job_matches_resume(offer_title, resume_text):
                     continue
+                emp_type = detect_employment_type(offer_title)
                 exists = db.fetchone("SELECT 1 FROM jobs WHERE link = ? AND user_id = ?", (offer_link, user_id))
                 if not exists:
-                    db.execute("INSERT INTO jobs (title, link, user_id) VALUES (?,?,?)", (offer_title, offer_link, user_id))
+                    db.execute("INSERT INTO jobs (title, link, user_id, employment_type) VALUES (?,?,?,?)", (offer_title, offer_link, user_id, emp_type))
 
             browser.close()
             return True
