@@ -99,6 +99,14 @@ class Profile(models.Model):
     summary = models.TextField(blank=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    #: When the guided tour was finished or skipped. Null means the user has not
+    #: seen it yet, so it is offered the next time they reach the workspace.
+    #:
+    #: Stored per account rather than in browser storage: this pilot hands out
+    #: accounts by invitation, and someone signing in from a second device
+    #: should not be shown the tour again just because that browser is new.
+    tour_completed_at = models.DateTimeField(null=True, blank=True)
+
     def __str__(self) -> str:
         return f"Profile<{self.user_id}>"
 

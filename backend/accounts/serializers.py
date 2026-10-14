@@ -27,10 +27,22 @@ from .models import (
 class UserSerializer(serializers.ModelSerializer):
     fullName = serializers.CharField(source="full_name")
     createdAt = serializers.DateTimeField(source="created_at", read_only=True)
+    #: Null until the guided tour has been finished or skipped.
+    #:
+    #: Surfaced here rather than on the profile payload so it arrives with the
+    #: session: `AuthProvider` already fetches `/auth/me/` once on load, so the
+    #: workspace can decide whether to offer the tour without an extra request.
+    tourCompletedAt = serializers.SerializerMethodField()
 
     class Meta:
         model = User
-        fields = ("id", "email", "fullName", "createdAt")
+        fields = ("id", "email", "fullName", "createdAt", "tourCompletedAt")
+
+    def get_tourCompletedAt(self, obj: User) -> str | None:  # noqa: N802 - API camelCase
+        profile = getattr(obj, "profile", None)
+        if profile is None or profile.tour_completed_at is None:
+            return None
+        return profile.tour_completed_at.isoformat()
 
 
 class RegisterSerializer(serializers.Serializer):
