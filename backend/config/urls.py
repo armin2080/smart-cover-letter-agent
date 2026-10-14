@@ -86,14 +86,36 @@ urlpatterns = [
     path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="docs"),
 ]
 
-# Uploaded CVs are served by Django in both modes: the reverse proxy (the
-# Cloudflare tunnel) only ever talks to gunicorn, so there is no other web
-# server to hand them to. Access is not public — the URLs are unguessable and
-# the files are reached only through the app.
-urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+def serve_media(request, path):
+    """Serve an uploaded file from `MEDIA_ROOT`.
 
-# Catch-all last, so every /api/ route above is matched first.
-urlpatterns += [re_path(r"^(?!api/|admin/|static/|media/)(?P<path>.*)$", spa)]
+    `MEDIA_ROOT` is read here rather than passed as `document_root` at import
+    time. Binding it into the URL pattern would freeze the value at startup, so
+    anything that changes it later — tests, or an operator relocating the
+    directory — would silently keep serving the original path.
+    """
+
+    return static_serve(request, path, document_root=str(settings.MEDIA_ROOT))
+
+
+# Uploaded CVs. Registered explicitly rather than through
+# `django.conf.urls.static.static()`, which returns an empty list whenever DEBUG
+# is false — so the obvious version of this added no route at all in production
+# and uploads could not be downloaded.
+urlpatterns += [re_path(r"^media/(?P<path>.*)$", serve_media, name="media")]
+
+# Catch-all last, so every route above is matched first.
+#
+# The lookahead matches a reserved word followed by `/` or end-of-string, not a
+# bare prefix and not a word boundary:
+#   * `admin/` alone let the bare `/admin` through, so the URL resolved,
+#     `APPEND_SLASH` never fired, and the browser got an empty 200 instead of a
+#     redirect to `/admin/`.
+#   * `\b` fixed that but also swallowed `/static-assets`, because a hyphen is a
+#     word boundary.
+# Requiring `/` or `$` excludes exactly the reserved namespaces and leaves
+# every client-side route — `/administration`, `/static-assets` — to the SPA.
+urlpatterns += [re_path(r"^(?!(?:api|admin|static|media)(?:/|$))(?P<path>.*)$", spa)]
 
 admin.site.site_header = "Smart Cover Letter Agent"
 admin.site.site_title = "Smart Cover Letter Agent"

@@ -131,6 +131,61 @@ class SpaServingTests(TestCase):
         response = self.client.get("/admin/login/")
         self.assertNotEqual(response.status_code, 404)
 
+    def test_slashless_admin_is_redirected_not_swallowed(self):
+        """`/admin` must redirect to `/admin/`, not be answered by the SPA.
+
+        The catch-all originally excluded `admin/` — with the slash. The bare
+        `/admin` therefore matched the SPA view, so the URL *resolved*,
+        `APPEND_SLASH` never fired, and the browser received an empty 200.
+        Django's redirect only happens if nothing matches the URL.
+        """
+
+        response = self.client.get("/admin")
+
+        self.assertEqual(response.status_code, 301)
+        self.assertEqual(response["Location"], "/admin/")
+
+    def test_other_slashless_prefixes_are_redirected_too(self):
+        """The same trap applies to any URL Django would normally fix up.
+
+        `/admin` is the one that bit us, because `admin/` is a real route and
+        so `APPEND_SLASH` redirects it — but only if the catch-all does not
+        match first.
+        """
+
+        response = self.client.get("/admin")
+
+        self.assertEqual(response.status_code, 301)
+        self.assertEqual(response["Location"], "/admin/")
+
+    def test_a_route_merely_starting_with_a_reserved_word_is_still_served(self):
+        """The exclusion must be a whole namespace, not a prefix or a word.
+
+        `/administration` and `/static-assets` are client-side routes. An
+        earlier version excluded on a bare prefix, and the one after that on a
+        word boundary — which a hyphen satisfies, so `/static-assets` was
+        wrongly withheld from the SPA.
+        """
+
+        for path in ("/administration", "/apiculture", "/static-assets", "/media-centre"):
+            with self.subTest(path=path):
+                response = self.client.get(path)
+                self.assertEqual(response.status_code, 200)
+                self.assertIn("text/html", response["Content-Type"])
+
+    def test_the_admin_redirect_is_relative(self):
+        """An absolute redirect would leak the internal host to the browser.
+
+        Behind the tunnel the origin is `127.0.0.1:8082`; the browser must be
+        sent to `/admin/` on its own host, not to the loopback address.
+        """
+
+        with override_settings(ALLOWED_HOSTS=["sca.armin2080.de"]):
+            response = self.client.get("/admin", HTTP_HOST="sca.armin2080.de")
+
+        self.assertEqual(response["Location"], "/admin/")
+        self.assertNotIn("127.0.0.1", response["Location"])
+
     def test_a_missing_build_is_reported_clearly(self):
         """Better an explicit error than a confusing 404 in production."""
 
@@ -140,3 +195,52 @@ class SpaServingTests(TestCase):
         response = self.client.get("/jobs")
 
         self.assertEqual(response.status_code, 404)
+
+
+class MediaServingTests(TestCase):
+    """Uploaded CVs must be downloadable in production.
+
+    They were not. The route was registered with
+    `django.conf.urls.static.static()`, which returns an empty list whenever
+    DEBUG is false — so the obvious-looking line added no route at all and the
+    files were unreachable. The tunnel only talks to gunicorn, so Django has to
+    serve them.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls._tmp = tempfile.TemporaryDirectory()
+        cls.media = Path(cls._tmp.name)
+        (cls.media / "cvs").mkdir()
+        (cls.media / "cvs" / "example.pdf").write_bytes(b"%PDF-1.4 fake")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._tmp.cleanup()
+        super().tearDownClass()
+
+    def setUp(self):
+        self.override = override_settings(MEDIA_ROOT=self.media)
+        self.override.enable()
+
+    def tearDown(self):
+        self.override.disable()
+
+    def test_an_uploaded_file_is_served(self):
+        response = self.client.get("/media/cvs/example.pdf")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(b"".join(response.streaming_content), b"%PDF-1.4 fake")
+
+    def test_a_missing_media_file_is_a_404_not_the_spa_shell(self):
+        response = self.client.get("/media/cvs/nope.pdf")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_media_does_not_leak_outside_its_root(self):
+        """Traversal must not reach the source tree."""
+
+        response = self.client.get("/media/../manage.py")
+
+        self.assertNotEqual(response.status_code, 200)
