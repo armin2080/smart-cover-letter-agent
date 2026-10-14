@@ -31,3 +31,7 @@ reportlab>=4.2
 # Static file serving in production (DEBUG=False). Without this, Django's
 # staticfiles app stops serving /static/ and the admin renders unstyled.
 whitenoise>=6.7
+
+# WSGI server for production. Kept here rather than installed ad-hoc so a
+# fresh deploy is reproducible — the service cannot start without it.
+gunicorn>=23.0

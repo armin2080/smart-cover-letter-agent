@@ -113,7 +113,10 @@ ASGI_APPLICATION = "config.asgi.application"
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
+        # Overridable so production can keep the database outside the source
+        # tree. A redeploy replaces source files, and the database must not be
+        # among them.
+        "NAME": Path(os.getenv("DJANGO_DB_PATH", BASE_DIR / "db.sqlite3")),
     }
 }
 
@@ -148,7 +151,9 @@ USE_TZ = True
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 MEDIA_URL = "/media/"
-MEDIA_ROOT = BASE_DIR / "media"
+# Uploaded CVs are the most sensitive data in the app, so production keeps them
+# outside the source tree for the same reason as the database.
+MEDIA_ROOT = Path(os.getenv("DJANGO_MEDIA_ROOT", BASE_DIR / "media"))
 
 # Whitenoise serves and compresses the collected static files in production.
 # The manifest backend hashes filenames so they can be cached indefinitely;
