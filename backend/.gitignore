@@ -1,0 +1,24 @@
+# Runtime data
+db.sqlite3
+db.sqlite3-journal
+*.sqlite3
+
+# Uploaded CVs and generated files
+media/
+staticfiles/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+
+# Test / coverage artefacts
+.coverage
+htmlcov/
+.pytest_cache/

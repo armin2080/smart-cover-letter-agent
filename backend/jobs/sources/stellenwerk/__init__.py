@@ -1,0 +1,1 @@
+"""stellenwerk source adapter package."""
