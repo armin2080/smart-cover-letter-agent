@@ -7,12 +7,13 @@ jobs.db
 users.db
 user_jobs.db
 notebook.ipynb
-
-# Django specific
-db.sqlite3
 *.log
-*.pot
-*.pyc
-.env
 .venv
+
+# Secrets and local state. Each sub-project ignores these too; repeated at the
+# root so a stray file here can never be committed by accident.
+.env
+.env.*
+!.env.example
+db.sqlite3
 local_settings.py
