@@ -119,7 +119,12 @@ def collect_raw_jobs(
     for name in requested:
         status = get_provider_status(name)
 
-        if status is not ProviderStatus.READY:
+        # `is_operational`, not an equality check against READY. A provider
+        # running under PROVIDER_TEST_MODE is usable but reports
+        # ENABLED_FOR_TESTING, so a READY-only test skipped every adapter and
+        # reported "no results" for each — with no error anywhere, which made
+        # it look like the platforms were empty rather than unreachable.
+        if not status.is_operational:
             # Never call the adapter when the gate says no.
             outcomes.append(SourceOutcome(source=name, status=status))
             continue
@@ -166,7 +171,11 @@ def collect_raw_jobs(
         outcomes.append(
             SourceOutcome(
                 source=name,
-                status=ProviderStatus.READY,
+                # The status that was actually resolved, not a hardcoded READY.
+                # Reporting READY here would present a test-mode source as
+                # authorized, which is the one thing the status is meant to
+                # make impossible to confuse.
+                status=status,
                 fetched=len(fetched),
                 enriched=enriched,
             )

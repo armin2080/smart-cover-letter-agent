@@ -712,6 +712,75 @@ class ProviderTestModeTests(TestCase):
         self.assertEqual(get_provider_status("manual"), ProviderStatus.READY)
         self.assertTrue(get_provider_status("manual").is_authorized)
 
+    def test_the_pipeline_calls_a_test_mode_adapter(self):
+        """Regression: the gate compared against READY, not "operational".
+
+        A test-mode provider reports ENABLED_FOR_TESTING. Checking
+        `status is not ProviderStatus.READY` therefore skipped every adapter,
+        recorded "no results" for each source, and surfaced no error at all —
+        so a broken gate looked exactly like empty search results. This checks
+        the adapter is actually reached.
+        """
+
+        from jobs.sources import pipeline as pipeline_module
+
+        calls: list[str] = []
+
+        class Adapter:
+            name = "linkedin"
+
+            def search(self, request):
+                calls.append(self.name)
+                return [
+                    RawJob(
+                        source="LinkedIn",
+                        title="Werkstudent Test",
+                        company="Acme",
+                        url="https://example.invalid/1",
+                    )
+                ]
+
+        original_status = pipeline_module.get_provider_status
+        original_adapter = pipeline_module.get_adapter
+        try:
+            pipeline_module.get_provider_status = lambda name: ProviderStatus.ENABLED_FOR_TESTING
+            pipeline_module.get_adapter = lambda name: Adapter()
+
+            raw, outcomes = pipeline_module.collect_raw_jobs(
+                SearchRequest(sources=["linkedin"], keywords=["x"], locations=["y"])
+            )
+        finally:
+            pipeline_module.get_provider_status = original_status
+            pipeline_module.get_adapter = original_adapter
+
+        self.assertEqual(calls, ["linkedin"], "the adapter was never called")
+        self.assertEqual(len(raw), 1)
+        self.assertEqual(outcomes[0].fetched, 1)
+
+    def test_the_outcome_reports_the_real_status_not_a_hardcoded_ready(self):
+        """A test-mode source must not be reported as authorized."""
+
+        from jobs.sources import pipeline as pipeline_module
+
+        class Adapter:
+            name = "linkedin"
+
+            def search(self, request):
+                return []
+
+        original_status = pipeline_module.get_provider_status
+        original_adapter = pipeline_module.get_adapter
+        try:
+            pipeline_module.get_provider_status = lambda name: ProviderStatus.ENABLED_FOR_TESTING
+            pipeline_module.get_adapter = lambda name: Adapter()
+            _, outcomes = pipeline_module.collect_raw_jobs(SearchRequest(sources=["linkedin"]))
+        finally:
+            pipeline_module.get_provider_status = original_status
+            pipeline_module.get_adapter = original_adapter
+
+        self.assertEqual(outcomes[0].status, ProviderStatus.ENABLED_FOR_TESTING)
+        self.assertFalse(outcomes[0].status.is_authorized)
+
 
 # --------------------------------------------------------------------------- #
 # Pipeline                                                                    #
