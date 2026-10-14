@@ -1,0 +1,29 @@
+# ---------------------------------------------------------------------------
+# Smart Cover Letter Agent - Django backend
+# ---------------------------------------------------------------------------
+
+# Core
+Django>=6.0,<6.1
+djangorestframework>=3.16
+
+# Authentication
+djangorestframework-simplejwt>=5.5
+
+# API plumbing
+django-cors-headers>=4.6
+django-filter>=24.3
+drf-spectacular>=0.28
+
+# Configuration
+python-dotenv>=1.0
+
+# Integrations (Groq cover letters, live job scraping)
+requests>=2.32
+beautifulsoup4>=4.12
+
+# CV text extraction
+pypdf>=5.1
+python-docx>=1.1
+
+# Cover letter PDF rendering
+reportlab>=4.2

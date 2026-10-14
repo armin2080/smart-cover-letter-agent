@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+dist-ssr/
+*.tsbuildinfo
+
+# Environment (never commit real secrets)
+.env
+.env.*
+!.env.example
+
+# Local overrides
+*.local
+
+# Figma Make export archive
+frontend.zip
+
+# Editor / OS
+.DS_Store
+*.log

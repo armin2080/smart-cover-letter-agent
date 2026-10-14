@@ -1,0 +1,329 @@
+/**
+ * Canonical API contracts shared by the frontend and the Django backend.
+ *
+ * These types describe the JSON payloads the UI expects. The Django REST
+ * Framework serializers should be authored to match them exactly — see
+ * `frontend/API_CONTRACT.md` for the full endpoint list.
+ */
+
+/* -------------------------------------------------------------------------- */
+/* Primitives                                                                 */
+/* -------------------------------------------------------------------------- */
+
+export type JobStatus = "new" | "reviewed" | "saved" | "dismissed"
+export type MatchLevel = "strong" | "good" | "potential"
+export type EmploymentType = "full-time" | "part-time" | "working-student" | "internship" | "minijob"
+export type JobSource = "LinkedIn" | "StepStone" | "Stellenwerk" | string
+
+export interface Paginated<T> {
+  count: number
+  next: string | null
+  previous: string | null
+  results: T[]
+}
+
+/* -------------------------------------------------------------------------- */
+/* Auth                                                                       */
+/* -------------------------------------------------------------------------- */
+
+export interface User {
+  id: number
+  email: string
+  fullName: string
+  createdAt: string
+}
+
+export interface AuthTokens {
+  access: string
+  refresh: string
+}
+
+export interface AuthResponse {
+  user: User
+  tokens: AuthTokens
+}
+
+export interface RegisterPayload {
+  fullName: string
+  email: string
+  password: string
+  passwordConfirm: string
+  acceptedTerms: boolean
+}
+
+export interface LoginPayload {
+  email: string
+  password: string
+  remember?: boolean
+}
+
+/* -------------------------------------------------------------------------- */
+/* Jobs                                                                       */
+/* -------------------------------------------------------------------------- */
+
+export interface Job {
+  id: number
+  title: string
+  company: string
+  companyInitials: string
+  companyColor: string
+  location: string
+  city?: string
+  region?: string
+  country?: string
+  employmentType: EmploymentType | string
+  employmentTypeLabel?: string
+  employmentTypeConfidence?: number
+  employmentTypeEvidence?: string[]
+  /**
+   * Categories that had evidence when the type could not be decided.
+   *
+   * Empty when the posting stated no type at all. Non-empty on an ambiguous
+   * listing, e.g. "Intern / Working Student" carries both.
+   */
+  employmentTypeCandidates?: string[]
+  workModel?: string
+  postedAt: string
+  collectedAt?: string
+  source: JobSource
+  sourceUrl: string
+  match: MatchLevel
+  status: JobStatus
+  skills: string[]
+  hasCoverLetter: boolean
+  isUserProvided?: boolean
+  salaryMin?: number | null
+  salaryMax?: number | null
+  /** Independent user-interaction timestamps. */
+  reviewedAt?: string | null
+  savedAt?: string | null
+  dismissedAt?: string | null
+}
+
+/** Authorization and availability state of one job source. */
+export interface ProviderStatus {
+  source: string
+  displayName: string
+  status: string
+  statusLabel: string
+  /** True only when live collection is permitted *and* working. */
+  operational: boolean
+  detail: string
+  termsNote: string
+}
+
+export interface ManualImportPayload {
+  url?: string
+  title: string
+  company?: string
+  location?: string
+  employmentType?: string
+  description?: string
+  notes?: string
+}
+
+/** One row in the explainable matching analysis. */
+export interface MatchLine {
+  positive: boolean
+  title: string
+  detail: string
+}
+
+export interface MatchAnalysis {
+  cvAlignment: MatchLine[]
+  preferenceFit: MatchLine[]
+}
+
+export interface JobDetail extends Job {
+  summary: string
+  responsibilities: string[]
+  requirements: string[]
+  analysis: MatchAnalysis
+}
+
+export interface JobFilters {
+  status?: JobStatus
+  q?: string
+  source?: string
+  location?: string
+  employmentType?: string
+  match?: MatchLevel
+  company?: string
+  ordering?: "newest" | "oldest" | "match"
+}
+
+export interface StatCard {
+  key: string
+  label: string
+  value: number
+  hint: string
+}
+
+export interface JobStats {
+  cards: StatCard[]
+  automaticSearchActive: boolean
+  lastSearchAt: string | null
+  nextSearchAt: string | null
+}
+
+export interface ActivityEntry {
+  id: number
+  kind: "discovered" | "reviewed" | "saved" | "cover-letter" | "dismissed"
+  title: string
+  subtitle: string
+  occurredAt: string
+}
+
+/* -------------------------------------------------------------------------- */
+/* Profile + preferences                                                      */
+/* -------------------------------------------------------------------------- */
+
+export interface CvDocument {
+  id: number
+  fileName: string
+  sizeBytes: number
+  uploadedAt: string
+  url: string | null
+  status: "processing" | "ready" | "error"
+}
+
+/** A structured, independently editable CV section. */
+export interface ProfileSection {
+  id: string
+  key:
+    | "personal"
+    | "summary"
+    | "education"
+    | "experience"
+    | "skills"
+    | "projects"
+    | "languages"
+    | "certificates"
+  title: string
+  content: string
+}
+
+export interface Profile {
+  fullName: string
+  email: string
+  phone: string
+  location: string
+  portfolio: string
+  summary: string
+  sections: ProfileSection[]
+  cv: CvDocument | null
+}
+
+export interface Preferences {
+  desiredRoles: string[]
+  locations: string[]
+  radiusKm: number
+  employmentTypes: EmploymentType[]
+  sources: string[]
+  keywords: string[]
+}
+
+/* -------------------------------------------------------------------------- */
+/* Searches                                                                   */
+/* -------------------------------------------------------------------------- */
+
+export type SearchMode = "manual" | "automatic"
+export type SearchStatus = "queued" | "running" | "completed" | "failed"
+export type StageState = "pending" | "active" | "done" | "error"
+
+export interface TaskStage {
+  key: string
+  label: string
+  detail?: string
+  state: StageState
+}
+
+export interface SearchCriteria {
+  roles: string[]
+  locations: string[]
+  radiusKm: number
+  employmentTypes: EmploymentType[]
+  sources: string[]
+  keywords: string[]
+  useSavedPreferences: boolean
+}
+
+export interface SearchRun {
+  id: number
+  mode: SearchMode
+  status: SearchStatus
+  startedAt: string
+  finishedAt: string | null
+  criteriaSummary: string
+  sources: string[]
+  discovered: number
+  matched: number
+  stages: TaskStage[]
+  error: string | null
+}
+
+export type SearchFrequency = "daily" | "weekly"
+
+export interface AutoSearchSettings {
+  enabled: boolean
+  frequency: SearchFrequency
+  timeOfDay: string
+  weekday: number | null
+  sources: string[]
+  status: "active" | "paused" | "error"
+  lastRunAt: string | null
+  nextRunAt: string | null
+}
+
+/* -------------------------------------------------------------------------- */
+/* Cover letters                                                              */
+/* -------------------------------------------------------------------------- */
+
+export type CoverTone = "professional" | "confident" | "warm"
+export type CoverLength = "concise" | "balanced" | "detailed"
+export type CoverLetterStatus = "generating" | "draft" | "saved"
+
+export interface CoverLetter {
+  id: number
+  jobId: number
+  content: string
+  language: string
+  tone: CoverTone
+  length: CoverLength
+  status: CoverLetterStatus
+  updatedAt: string
+  savedAt: string | null
+}
+
+export interface CoverLetterRequest {
+  jobId: number
+  language: string
+  tone: CoverTone
+  length: CoverLength
+  instructions?: string
+}
+
+export interface CoverLetterGeneration {
+  job: Job
+  cvLabel: string
+  language: string
+  tone: CoverTone
+  stages: TaskStage[]
+}
+
+/* -------------------------------------------------------------------------- */
+/* Settings                                                                   */
+/* -------------------------------------------------------------------------- */
+
+export interface NotificationSettings {
+  newMatches: boolean
+  searchCompleted: boolean
+  searchFailures: boolean
+}
+
+export interface AccountUpdate {
+  fullName?: string
+  email?: string
+  currentPassword?: string
+  newPassword?: string
+}

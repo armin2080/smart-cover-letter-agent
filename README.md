@@ -1,241 +1,137 @@
-# Smart Cover Letter Agent — Personalized cover letters, faster
+# Smart Cover Letter Agent
 
-Turn any resume and job posting into a polished, tailored cover letter in seconds. Smart Cover Letter Agent combines your profile data with job details and AI-powered text generation so you can apply more, faster, and get better responses.
+Job discovery, explainable CV matching, and AI-assisted cover letter generation.
 
-Why it helps:
-- Save hours per application with instantly generated, role-specific cover letters.
-- Write with confidence: professional tone, tailored highlights, and recruiter-friendly structure.
-- Keep control: customize output, reuse templates, or fine-tune content per job.
+| | |
+| --- | --- |
+| **Frontend** | React 19 + Vite + TypeScript — [`frontend/`](frontend/) |
+| **Backend** | Django 6 + DRF — [`backend/`](backend/) |
+| **Telegram app** | Original Python bot, preserved — [`old version/`](old%20version/) |
 
-Highlights:
-- AI-powered personalization from your profile and job descriptions
-- API-first backend for integration with UIs, pipelines, and automation
-- Extensible: swap AI providers (Gemini or others) and add scraping or ATS integrations
+The repository currently contains **two independent applications**:
 
-Tech stack:
-- Backend: Django 6 + Django REST Framework
-- Frontend: Vite + React (see `front/SMART-COVER-LETTER-AGENT-FRONTEND`)
-- Data: SQLite for local development (can be swapped for production DB)
+1. The **web application** (`frontend/` + `backend/`) — job discovery, matching
+   and cover letters, built on the Django REST API.
+2. The **original Telegram bot** (`old version/`) — untouched, self-contained, and
+   not wired into the web application.
 
-## Quick Start
+## Running the stack
 
-1. Install dependencies:
+Two terminals.
+
 ```bash
-pip install -r requirements.txt
+# Terminal 1 — backend
+cd backend
+../.venv/bin/pip install -r requirements.txt
+../.venv/bin/python manage.py migrate
+../.venv/bin/python manage.py seed_demo          # optional demo data
+../.venv/bin/python manage.py runserver 8000
+
+# Terminal 2 — frontend
+cd frontend
+npm install
+
+# Point the UI at Django instead of the built-in mock transport.
+printf 'VITE_API_URL=\nVITE_USE_MOCKS=false\n' > .env.local
+
+npm run dev                                       # http://localhost:5173
 ```
 
-2. Run migrations:
+The Vite dev server proxies `/api` to `http://localhost:8000`, so no CORS setup
+is needed. Without `.env.local` the frontend runs on mock data instead. Log in
+with the seeded account:
+
+```
+armin.keller@example.com
+demo-password-123
+```
+
+### Running the frontend on its own
+
+The frontend ships with an in-browser mock transport and works with no backend at
+all — a **"Sample data"** pill appears in the top bar while it is active.
+
 ```bash
-python manage.py makemigrations
-python manage.py migrate
+cd frontend && npm run dev
 ```
 
-3. Start the server:
+Switch transports with environment variables only (see
+[`frontend/API_CONTRACT.md`](frontend/API_CONTRACT.md)):
+
+| `VITE_API_URL` | `VITE_USE_MOCKS` | Result |
+| --- | --- | --- |
+| *(empty)* | *(empty)* | mock transport |
+| *(empty)* | `false` | real API via the dev proxy |
+| set | *(empty)* | real API |
+| set | `true` | mock transport (forced) |
+
+## Feature overview
+
+* **Onboarding** — CV upload (PDF/DOCX) with text extraction and section mapping,
+  profile review, and job preferences.
+* **Find Jobs** — manual search with editable criteria, automatic scheduled
+  search, staged live progress, per-source availability, and search history.
+* **My Jobs** — split-view list and detail, independent status tracking (reviewed
+  / saved / dismissed as separate timestamps), filters, and an explainable match
+  analysis separating **CV alignment** from **preference fit**.
+* **Manual import** — add a job you found yourself; it joins the same matching and
+  cover-letter workflow.
+* **Cover Letter** — generation grounded strictly in the user's own profile, an
+  editor with tone/language/length controls, and PDF export.
+* **Profile & Settings** — CV management, structured profile sections, preferences,
+  notifications, and account deletion.
+
+Relevance is deliberately **qualitative** (`Strong` / `Good` / `Potential` / `Low`)
+with plain-language reasons — never an opaque percentage.
+
+Employment type is classified from German *and* English terminology
+(`Werkstudent`, `Werkstudierende`, `Praktikum`, `HiWi`, `studentische Hilfskraft`,
+…), with confidence scores and the matching terms recorded for auditability.
+Ambiguous listings stay `Unknown` rather than being guessed at.
+
+### Where job results come from
+
+**No live platform collection is enabled by default.** LinkedIn, StepStone and
+Stellenwerk all restrict automated collection in their terms, and no written
+authorization is on record for any of them. The adapters are implemented and
+fixture-tested, but they sit behind a compliance gate that requires **both** an
+explicit enable **and** a recorded authorization reference before a single request
+is made.
+
+Until then:
+
+* Searches run against clearly-labelled **sample data**, and the run states why.
+* **Manual import** (`POST /api/jobs/import/`) is the working path — users add
+  listings they found themselves. It performs no third-party access, so it needs
+  no authorization. The supplied URL is stored but never fetched.
+
+The UI reports each source's real status, so it never implies a connection that
+does not exist.
+
+* [`docs/provider-authorization-matrix.md`](docs/provider-authorization-matrix.md) — per-platform status and requirements
+* [`docs/job-source-setup.md`](docs/job-source-setup.md) — enabling a provider
+* [`docs/job-discovery-architecture.md`](docs/job-discovery-architecture.md) — the pipeline
+* [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) — upstream licences and test results
+
+## Documentation
+
+* [`backend/README.md`](backend/README.md) — API, matching engine, search pipeline, configuration
+* [`frontend/README.md`](frontend/README.md) — frontend architecture and conventions
+* [`frontend/API_CONTRACT.md`](frontend/API_CONTRACT.md) — endpoint and payload contract
+* [`old version/README.md`](old%20version/README.md) — the original Telegram application
+
+## Sample data
+
+Every company name, job listing, statistic and person referenced in the seed data,
+mock transport and documentation is **illustrative sample data**, not real
+information.
+
+## Development notes
+
 ```bash
-python manage.py runserver
+# Backend — 102 tests
+cd backend && ../.venv/bin/python manage.py test
+
+# Frontend — type check and production build
+cd frontend && npm run typecheck && npm run build
 ```
-
-Server will run at: `http://127.0.0.1:8000/`
-
-## Authentication System
-
-The API uses **JWT (JSON Web Tokens)** for authentication.
-
-### Available Endpoints
-
-#### 1. Register
-- **URL**: `POST /api/register/`
-- **Permission**: Public
-- **Request Body**:
-```json
-{
-  "username": "john",
-  "email": "john@example.com",
-  "password": "securepass123",
-  "password2": "securepass123"
-}
-```
-- **Response** (201 Created):
-```json
-{
-  "user": {
-    "id": 1,
-    "username": "john",
-    "email": "john@example.com",
-    "experience": "",
-    "skills": [],
-    "certificates": [],
-    "preferred_jobs": ""
-  },
-  "refresh": "refresh_token_here",
-  "access": "access_token_here"
-}
-```
-
-#### 2. Login
-- **URL**: `POST /api/login/`
-- **Permission**: Public
-- **Request Body**:
-```json
-{
-  "username": "john",
-  "password": "securepass123"
-}
-```
-- **Response** (200 OK):
-```json
-{
-  "refresh": "refresh_token_here",
-  "access": "access_token_here"
-}
-```
-
-#### 3. Logout
-- **URL**: `POST /api/logout/`
-- **Permission**: Authenticated
-- **Headers**: `Authorization: Bearer <access_token>`
-- **Request Body**:
-```json
-{
-  "refresh": "refresh_token_here"
-}
-```
-- **Response** (205 Reset Content):
-```json
-{
-  "success": true
-}
-```
-
-#### 4. Token Refresh
-- **URL**: `POST /api/token/refresh/`
-- **Permission**: Public
-- **Request Body**:
-```json
-{
-  "refresh": "refresh_token_here"
-}
-```
-- **Response** (200 OK):
-```json
-{
-  "access": "new_access_token_here"
-}
-```
-
-#### 5. Get Profile
-- **URL**: `GET /api/profile/`
-- **Permission**: Authenticated
-- **Headers**: `Authorization: Bearer <access_token>`
-- **Response** (200 OK):
-```json
-{
-  "experience": "5 years as a software developer...",
-  "skills": ["Python", "Django", "JavaScript"],
-  "certificates": ["AWS Certified", "Google Cloud"],
-  "preferred_jobs": "Backend Developer, Full Stack Engineer"
-}
-```
-
-#### 6. Update Profile
-- **URL**: `PUT /api/profile/`
-- **Permission**: Authenticated
-- **Headers**: `Authorization: Bearer <access_token>`
-- **Request Body**:
-```json
-{
-  "experience": "5 years as a software developer...",
-  "skills": ["Python", "Django", "JavaScript", "React"],
-  "certificates": ["AWS Certified", "Google Cloud Professional"],
-  "preferred_jobs": "Senior Backend Developer"
-}
-```
-- **Response** (200 OK):
-```json
-{
-  "success": true
-}
-```
-
-## Testing with cURL
-
-### Register a new user:
-```bash
-curl -X POST http://127.0.0.1:8000/api/register/ \
-  -H "Content-Type: application/json" \
-  -d '{
-    "username": "testuser",
-    "email": "test@example.com",
-    "password": "TestPass123!",
-    "password2": "TestPass123!"
-  }'
-```
-
-### Login:
-```bash
-curl -X POST http://127.0.0.1:8000/api/login/ \
-  -H "Content-Type: application/json" \
-  -d '{
-    "username": "testuser",
-    "password": "TestPass123!"
-  }'
-```
-
-### Get Profile (replace TOKEN with your access token):
-```bash
-curl -X GET http://127.0.0.1:8000/api/profile/ \
-  -H "Authorization: Bearer TOKEN"
-```
-
-### Update Profile:
-```bash
-curl -X PUT http://127.0.0.1:8000/api/profile/ \
-  -H "Authorization: Bearer TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "experience": "I am a data scientist with 3 years of experience",
-    "skills": ["Python", "Machine Learning", "Django"],
-    "certificates": ["Data Science Certification"],
-    "preferred_jobs": "Data Scientist, ML Engineer"
-  }'
-```
-
-## Project Structure
-
-```
-smart-cover-letter-agent/
-├── manage.py
-├── requirements.txt
-├── db.sqlite3
-├── coverletter/          # Main project settings
-│   ├── settings.py
-│   ├── urls.py
-│   └── wsgi.py
-├── accounts/             # Authentication & user profiles
-│   ├── models.py        # Custom User model
-│   ├── serializers.py   # API serializers
-│   ├── views.py         # API views
-│   ├── urls.py          # URL routing
-│   └── admin.py         # Admin configuration
-├── jobs/                # Jobs & cover letter generation (to be implemented)
-│   └── ...
-└── old version/         # Previous Telegram bot code
-    └── ...
-```
-
-## Next Steps
-
-- [ ] Implement job listing endpoints
-- [ ] Implement cover letter generation endpoint
-- [ ] Integrate Gemini AI for cover letter generation
-- [ ] Add job scraping functionality
-
-## CORS Configuration
-
-The API is configured to accept requests from:
-- `http://localhost:3000` (React)
-- `http://localhost:5173` (Vite)
-- `http://127.0.0.1:3000`
-- `http://127.0.0.1:5173`
-
-Update `CORS_ALLOWED_ORIGINS` in `settings.py` if your frontend runs on a different port.
