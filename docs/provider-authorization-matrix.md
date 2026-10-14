@@ -24,10 +24,10 @@ returns `None`.
 ### The verification run
 
 A single, manually triggered verification run was performed at the operator's
-explicit request, using a temporary local `backend/.env` whose authorization
-references were literally `TEST-RUN-ONLY-NOT-AN-AUTHORIZATION`. **That string is
-not an authorization.** It satisfies the gate's technical check so the code paths
-could be exercised once, and it is self-describing precisely so it can never be
+explicit request, using a temporary local `backend/.env` with `PROVIDER_TEST_MODE`
+switched on. **Test mode is not an authorization.** It waives the gate's second
+condition so the code paths could be exercised, and every provider it enabled was
+reported as `ENABLED_FOR_TESTING` — never `READY` — precisely so it cannot be
 mistaken for permission.
 
 What that run established:
@@ -59,13 +59,40 @@ adapter is never instantiated — let alone called.
 
 Statuses:
 
-| Status | Meaning |
-| --- | --- |
-| `READY` | Enabled, authorised, and usable. |
-| `DISABLED_AUTHORIZATION_PENDING` | Enabled but no written authorization recorded. |
-| `DISABLED_BY_CONFIG` | Switched off. |
-| `TEMPORARILY_UNAVAILABLE` | Authorised but currently blocked or rate limited. |
-| `INTEGRATION_ERROR` | Adapter misconfigured or raised unexpectedly. |
+| Status | Meaning | Operational | Authorized |
+| --- | --- | --- | --- |
+| `READY` | Enabled, authorised, and usable. | Yes | Yes |
+| `ENABLED_FOR_TESTING` | Test mode is on and no authorization is recorded. | Yes | **No** |
+| `DISABLED_AUTHORIZATION_PENDING` | Enabled but no written authorization recorded. | No | No |
+| `DISABLED_BY_CONFIG` | Switched off. | No | No |
+| `TEMPORARILY_UNAVAILABLE` | Authorised but currently blocked or rate limited. | No | No |
+| `INTEGRATION_ERROR` | Adapter misconfigured or raised unexpectedly. | No | No |
+
+### Test mode (`PROVIDER_TEST_MODE`)
+
+Setting `PROVIDER_TEST_MODE=true` waives condition 2 so the adapters can be
+evaluated before any agreement exists. It is a deliberate, clearly-named
+override rather than a way to pretend an authorization is on record.
+
+What it does **not** do:
+
+- It does not claim permission. A provider it enables resolves to
+  `ENABLED_FOR_TESTING`, never `READY`, and `is_authorized` stays `False`.
+- It does not enable anything on its own. A provider must still have
+  `PROVIDER_<NAME>_ENABLED=true`; test mode only removes the second condition.
+- It does not override an explicit disable, and a genuine authorization
+  reference still takes precedence when one exists.
+- It does not stay quiet. Every resolution logs a warning, the health detail
+  is prefixed with `TEST MODE`, and the UI renders the source in amber as
+  *“Test mode — no authorization”* rather than green.
+
+Default: `false`. Leave it off for anything beyond evaluation.
+
+This replaces the earlier practice of putting a placeholder string in
+`AUTHORIZATION_REFERENCE` to satisfy the gate. That was worse: a string that
+*says* it is not an authorization sits in the same field as a real reference,
+so nothing in the system could tell the two apart. Test mode keeps the
+distinction visible everywhere.
 
 ## Platform positions
 
@@ -196,10 +223,15 @@ any ongoing use:
 
 ```bash
 # backend/.env
+PROVIDER_TEST_MODE=false
 PROVIDER_LINKEDIN_ENABLED=false
 PROVIDER_STEPSTONE_ENABLED=false
 PROVIDER_STELLENWERK_ENABLED=false
 ```
+
+Turning off `PROVIDER_TEST_MODE` alone is enough to close the gate even if the
+per-provider flags stay on: without an authorization reference each provider
+returns to `DISABLED_AUTHORIZATION_PENDING`.
 
 The Django development server must be **restarted** afterwards. `settings.py`
 reads `.env` once at import time, so a server started with `--noreload` (or any

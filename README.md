@@ -108,6 +108,80 @@ Until then:
 The UI reports each source's real status, so it never implies a connection that
 does not exist.
 
+#### Evaluating the adapters before any agreement exists
+
+`PROVIDER_TEST_MODE=true` waives the authorization requirement so the adapters can
+be exercised. It is deliberately not a way to pretend permission exists:
+
+* Providers it enables report **"Test mode — no authorization"**, never "Ready",
+  and the UI shows them in amber rather than green.
+* It enables nothing by itself — each provider still needs its own
+  `PROVIDER_<NAME>_ENABLED=true`.
+* It never overrides a genuine authorization reference, which always takes
+  precedence.
+
+Default is `false`. Leave it off for anything beyond evaluation.
+
+## Registration
+
+**Self-service registration is off by default.** The intended deployment is an
+invitation-only pilot: accounts are created deliberately through the admin panel
+(`/admin/`) or with `manage.py createsuperuser`, and the signup form is hidden.
+
+`REGISTRATION_ENABLED=true` opens it up. The flag is served publicly by
+`GET /api/config/` so the login screen knows whether to offer a signup link, and
+`POST /api/auth/register/` is refused with `403` while it is closed — the backend
+is the boundary, the hidden form is only a courtesy.
+
+## Automatic search needs a scheduler
+
+Setting "Automatic search" on only records a **preference** — it does not start
+anything. The application knows *when* a search should next run, but nothing in
+the web process fires on a timer, so without an external trigger the next-run
+time is an intention that will never arrive.
+
+To make it real, add a cron entry and tell the app it exists:
+
+```bash
+# Run the scheduled searches hourly
+0 * * * * cd /path/to/backend && .venv/bin/python manage.py run_scheduled_searches
+```
+
+```bash
+# backend/.env — so the UI reports the schedule as live
+AUTO_SEARCH_SCHEDULER_ENABLED=true
+```
+
+Until both are done, `AUTO_SEARCH_SCHEDULER_ENABLED` stays `false` and the UI
+says so plainly ("Automatic search is on, but not scheduled") instead of
+counting down to a run that will never happen.
+
+## No password reset
+
+There is no self-service password reset: no mail backend is configured, and
+accounts are created by an administrator. The login screen says as much rather
+than offering a link that goes nowhere. To reset someone's password, use the
+Django admin at `/admin/`.
+
+If you later add an email backend, implement reset by issuing a
+`PasswordResetTokenGenerator` link and remove the note in `AuthPage.tsx`.
+
+## Guided tour
+
+A new account is shown a short spotlight tour of the workspace the first time it
+reaches a signed-in screen. It highlights the navigation, the notification bell,
+and ends with a pointer to Find Jobs.
+
+The state lives on the account (`Profile.tour_completed_at`), not in browser
+storage, so signing in from a second device does not replay it. Finishing and
+skipping are equivalent — both mean "do not show this again" — and the tour can
+be replayed at any time from **Settings → Guided tour**.
+
+It is hand-rolled (`frontend/src/components/tour/`) rather than a tour library:
+one screen's worth of behaviour did not justify the dependency. Targets are
+plain `data-tour` attributes, so adding a step means adding an attribute and an
+entry to `steps.ts` — no component wiring.
+
 * [`docs/provider-authorization-matrix.md`](docs/provider-authorization-matrix.md) — per-platform status and requirements
 * [`docs/job-source-setup.md`](docs/job-source-setup.md) — enabling a provider
 * [`docs/job-discovery-architecture.md`](docs/job-discovery-architecture.md) — the pipeline
