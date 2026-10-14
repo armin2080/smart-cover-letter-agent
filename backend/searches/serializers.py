@@ -77,6 +77,12 @@ class AutoSearchSettingsSerializer(serializers.ModelSerializer):
     status = serializers.CharField(read_only=True)
     lastRunAt = serializers.DateTimeField(source="last_run_at", read_only=True)
     nextRunAt = serializers.DateTimeField(source="next_run_at", read_only=True)
+    #: Whether an external scheduler actually runs the searches.
+    #:
+    #: Setting `enabled` only records intent; nothing in the web process fires
+    #: on a timer. Surfaced so the UI can say "scheduled" honestly instead of
+    #: counting down to a run that will never happen.
+    schedulerActive = serializers.SerializerMethodField()
 
     class Meta:
         model = AutoSearchSettings
@@ -89,7 +95,13 @@ class AutoSearchSettingsSerializer(serializers.ModelSerializer):
             "status",
             "lastRunAt",
             "nextRunAt",
+            "schedulerActive",
         )
+
+    def get_schedulerActive(self, obj: AutoSearchSettings) -> bool:  # noqa: N802 - API camelCase
+        from django.conf import settings
+
+        return bool(settings.AUTO_SEARCH_SCHEDULER_ENABLED)
 
     def validate_timeOfDay(self, value: str) -> str:  # noqa: N802 - API camelCase
         try:

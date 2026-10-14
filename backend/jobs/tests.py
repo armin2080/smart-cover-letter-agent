@@ -1,6 +1,7 @@
 """Tests for the jobs API and the explainable matching engine."""
 
 from django.contrib.auth import get_user_model
+from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework import status
@@ -56,6 +57,7 @@ class JobModelTests(APITestCase):
             make_job(self.user)
 
 
+@platform_providers_disabled()
 class JobApiTests(APITestCase):
     def setUp(self):
         self.user = User.objects.create_user(email="api@example.com", password=PASSWORD)
@@ -210,6 +212,29 @@ class JobApiTests(APITestCase):
         self.assertEqual(cards["new"], 1)
         self.assertEqual(cards["saved"], 1)
         self.assertIn("automaticSearchActive", response.data)
+
+    def test_stats_report_whether_a_scheduler_is_actually_running(self):
+        """Requested and scheduled are different things.
+
+        Nothing inside the web process triggers a search on a timer, so without
+        an external scheduler `nextSearchAt` would never arrive. The API has to
+        say which of the two situations applies.
+        """
+
+        with override_settings(AUTO_SEARCH_SCHEDULER_ENABLED=False):
+            response = self.client.get(reverse("job-stats"))
+        self.assertFalse(response.data["schedulerActive"])
+
+        with override_settings(AUTO_SEARCH_SCHEDULER_ENABLED=True):
+            response = self.client.get(reverse("job-stats"))
+        self.assertTrue(response.data["schedulerActive"])
+
+    def test_a_scheduler_is_not_claimed_by_default(self):
+        from django.conf import settings
+
+        self.assertFalse(settings.AUTO_SEARCH_SCHEDULER_ENABLED)
+        response = self.client.get(reverse("job-stats"))
+        self.assertFalse(response.data["schedulerActive"])
 
     def test_recent_excludes_dismissed_and_respects_limit(self):
         response = self.client.get(reverse("job-recent"), {"limit": 2})

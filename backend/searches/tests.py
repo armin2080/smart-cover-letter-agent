@@ -60,6 +60,7 @@ class CriteriaSummaryTests(APITestCase):
         self.assertEqual(criteria["sources"], ["linkedin"])
 
 
+@platform_providers_disabled()
 class AutoSearchScheduleTests(APITestCase):
     def setUp(self):
         self.user = User.objects.create_user(email="auto@example.com", password=PASSWORD)
@@ -250,6 +251,32 @@ class AutoSearchSettingsApiTests(APITestCase):
         response = self.client.put(reverse("search-settings"), {"enabled": False}, format="json")
         self.assertEqual(response.data["status"], "paused")
         self.assertIsNone(response.data["nextRunAt"])
+
+    def test_settings_disclose_whether_a_scheduler_is_running(self):
+        """`enabled` records intent; it does not start anything.
+
+        The application cannot schedule itself, so the UI needs to know whether
+        an external scheduler is set up before it counts down to a next run.
+        """
+
+        with override_settings(AUTO_SEARCH_SCHEDULER_ENABLED=False):
+            self.assertFalse(self.client.get(reverse("search-settings")).data["schedulerActive"])
+
+        with override_settings(AUTO_SEARCH_SCHEDULER_ENABLED=True):
+            self.assertTrue(self.client.get(reverse("search-settings")).data["schedulerActive"])
+
+    def test_next_run_is_computed_even_without_a_scheduler(self):
+        """The intended time is still worth reporting; it is just not a promise.
+
+        `schedulerActive` is what distinguishes the two readings, so this stays
+        populated either way.
+        """
+
+        with override_settings(AUTO_SEARCH_SCHEDULER_ENABLED=False):
+            response = self.client.get(reverse("search-settings"))
+
+        self.assertIsNotNone(response.data["nextRunAt"])
+        self.assertFalse(response.data["schedulerActive"])
 
 
 class RunnerRobustnessTests(APITestCase):

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from django.conf import settings
 from django.db.models import Count, Q
 from django.utils import timezone
 from rest_framework import status
@@ -248,6 +249,9 @@ class JobStatsView(APIView):
             "automaticSearchActive": auto.enabled,
             "lastSearchAt": auto.last_run_at,
             "nextSearchAt": auto.next_run_at if auto.enabled else None,
+            # Reported separately so the UI can distinguish "scheduled and
+            # will run" from "scheduled, but nothing is set up to run it".
+            "schedulerActive": settings.AUTO_SEARCH_SCHEDULER_ENABLED,
         }
         return Response(JobStatsSerializer(payload).data)
 

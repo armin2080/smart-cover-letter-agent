@@ -157,3 +157,6 @@ class JobStatsSerializer(serializers.Serializer):
     automaticSearchActive = serializers.BooleanField()
     lastSearchAt = serializers.DateTimeField(allow_null=True)
     nextSearchAt = serializers.DateTimeField(allow_null=True)
+    #: True only when an external scheduler actually runs the searches.
+    #: Without it, `nextSearchAt` is an intention that will never arrive.
+    schedulerActive = serializers.BooleanField()
