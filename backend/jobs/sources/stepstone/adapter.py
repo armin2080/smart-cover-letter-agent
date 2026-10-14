@@ -11,7 +11,7 @@ from urllib.parse import quote
 
 from django.conf import settings
 
-from jobs.sources.base import JobSourceAdapter, RawJob, SearchRequest
+from jobs.sources.base import JobSourceAdapter, RawJob, SearchRequest, _search_terms
 from jobs.sources.http import SourceHttpClient
 from jobs.sources.stepstone import parser
 
@@ -32,14 +32,39 @@ class StepStoneAdapter(JobSourceAdapter):
         )
 
     def search(self, request: SearchRequest) -> list[RawJob]:
+        """Search once per keyword and merge the results.
+
+        Only the first keyword used to be searched, so a user whose desired
+        roles are `["AI", "Data", "Web"]` had every source queried for the
+        literal string "AI" — which returns nothing, and looked like the
+        sources were broken rather than the query.
+
+        The number of queries is capped: each one costs a request, and this
+        adapter talks to a real platform.
+        """
+
         jobs: list[RawJob] = []
         seen: set[str] = set()
-        keywords = request.keywords or ["Werkstudent"]
-        location = request.locations[0] if request.locations else "Deutschland"
         limit = min(request.max_results or settings.SOURCE_MAX_RESULTS, settings.SOURCE_MAX_RESULTS)
 
+        for term in _search_terms(request):
+            if len(jobs) >= limit:
+                break
+            for job in self._search_term(term, request, limit - len(jobs)):
+                key = job.external_id or job.url or job.title.lower()
+                if key in seen:
+                    continue
+                seen.add(key)
+                jobs.append(job)
+
+        return jobs
+
+    def _search_term(self, term: str, request: SearchRequest, remaining: int) -> list[RawJob]:
+        jobs: list[RawJob] = []
+        location = request.locations[0] if request.locations else "Deutschland"
+
         # StepStone expects spaces as '+', not '%20'.
-        search_path = parser.build_search_url(quote(keywords[0]), quote(location))
+        search_path = parser.build_search_url(quote(term), quote(location))
 
         for page in range(1, MAX_PAGES + 1):
             params = {
@@ -60,7 +85,7 @@ class StepStoneAdapter(JobSourceAdapter):
                     headers={"Content-Type": "application/json", "Accept": "application/json"},
                 )
             except Exception as exc:  # noqa: BLE001 - SourceBlocked propagates to the pipeline
-                logger.warning("StepStone request failed on page %s: %s", page, exc)
+                logger.warning("StepStone request failed for %r on page %s: %s", term, page, exc)
                 raise
 
             page_jobs, pagination = parser.parse_result_list(response.text)
@@ -69,16 +94,12 @@ class StepStoneAdapter(JobSourceAdapter):
 
             added = 0
             for job in page_jobs:
-                key = job.external_id or job.url or job.title.lower()
-                if key in seen:
-                    continue
-                seen.add(key)
                 jobs.append(job)
                 added += 1
-                if len(jobs) >= limit:
+                if len(jobs) >= remaining:
                     break
 
-            if added == 0 or len(jobs) >= limit:
+            if added == 0 or len(jobs) >= remaining:
                 break
             if parser.total_pages(pagination) and page >= parser.total_pages(pagination):
                 break

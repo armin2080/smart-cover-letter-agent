@@ -169,12 +169,18 @@ def _build_request(run: SearchRun) -> SearchRequest:
 
 
 def _has_live_provider(sources: list[str]) -> bool:
-    """True when at least one requested source is authorized for live collection."""
+    """True when at least one requested source may actually be collected from.
 
-    from jobs.sources.base import ProviderStatus
+    Uses `is_operational` rather than comparing against READY. A provider
+    running under `PROVIDER_TEST_MODE` is usable but reports
+    ENABLED_FOR_TESTING, so a READY-only check would declare that no live
+    source exists and silently substitute sample data — which is exactly what
+    happened.
+    """
+
     from jobs.sources.registry import get_provider_status
 
-    return any(get_provider_status(name) is ProviderStatus.READY for name in (sources or []))
+    return any(get_provider_status(name).is_operational for name in (sources or []))
 
 
 def _run(run_id: int) -> None:

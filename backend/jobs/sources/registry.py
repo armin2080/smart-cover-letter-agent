@@ -103,6 +103,28 @@ def authorization_reference(provider: str) -> str:
     return (getattr(settings, _setting_name(provider, "AUTHORIZATION_REFERENCE"), "") or "").strip()
 
 
+def resolve_provider_name(name: str) -> str | None:
+    """Map any spelling of a provider to its registry key, or None.
+
+    Users and the frontend refer to sources by display name — "LinkedIn",
+    "StepStone" — while the registry keys are lowercase identifiers. Accepting
+    both here means every caller does not have to remember which form to use,
+    and a mismatch cannot silently degrade into "no provider available".
+    """
+
+    if not name:
+        return None
+
+    candidate = name.strip().lower().replace(" ", "").replace("_", "").replace("-", "")
+    for key, config in PROVIDERS.items():
+        if candidate in {
+            key.replace("_", "").replace("-", ""),
+            config.display_name.lower().replace(" ", "").replace("_", "").replace("-", ""),
+        }:
+            return key
+    return None
+
+
 def is_test_mode() -> bool:
     """Whether `PROVIDER_TEST_MODE` is on.
 
@@ -123,9 +145,12 @@ def get_provider_status(provider: str) -> ProviderStatus:
     deliberately.
     """
 
-    config = PROVIDERS.get(provider)
+    key = resolve_provider_name(provider)
+    config = PROVIDERS.get(key) if key else None
     if config is None:
         return ProviderStatus.INTEGRATION_ERROR
+
+    provider = key  # normalise, so the settings lookups below match
 
     if not config.live_collection_expected:
         # The manual path performs no third-party collection.
@@ -160,8 +185,11 @@ def get_adapter(provider: str) -> JobSourceAdapter | None:
     accidentally bypass the gate by ignoring the status.
     """
 
-    if not get_provider_status(provider).is_operational:
+    key = resolve_provider_name(provider)
+    if key is None or not get_provider_status(key).is_operational:
         return None
+
+    provider = key
 
     # Imported lazily so a broken optional adapter cannot break the registry.
     try:

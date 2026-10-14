@@ -253,6 +253,32 @@ class SearchRequest:
         return " · ".join(parts) or "Profile preferences"
 
 
+#: How many distinct search terms one source will be queried with.
+#:
+#: Each term costs a request, so this is a budget rather than a preference. A
+#: user's desired roles are often a list of themes — "AI", "Data", "Web" —
+#: and querying only the first returns nothing useful.
+MAX_SEARCH_TERMS = 3
+
+
+def _search_terms(request: SearchRequest) -> list[str]:
+    """The distinct terms to query a source with, in order.
+
+    Falls back to a broad term when the user has expressed no preference, so a
+    search still returns something rather than querying an empty string.
+    """
+
+    seen: list[str] = []
+    for term in request.keywords or []:
+        cleaned = (term or "").strip()
+        if cleaned and cleaned.lower() not in {t.lower() for t in seen}:
+            seen.append(cleaned)
+        if len(seen) >= MAX_SEARCH_TERMS:
+            break
+
+    return seen or ["Werkstudent"]
+
+
 # --------------------------------------------------------------------------- #
 # Adapter interface                                                           #
 # --------------------------------------------------------------------------- #
