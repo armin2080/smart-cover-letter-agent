@@ -17,6 +17,7 @@ import type {
   Preferences,
   Profile,
   ProviderStatus,
+  PublicConfig,
   RegisterPayload,
   SearchCriteria,
   SearchRun,
@@ -39,6 +40,16 @@ export interface RequestOpts {
  * requires a component change.
  */
 export interface ApiSurface {
+  config: {
+    /**
+     * Feature flags available before authentication.
+     *
+     * Never rejects in practice; callers should still tolerate a failure and
+     * fall back to the safe default of registration being closed.
+     */
+    get(opts?: RequestOpts): Promise<PublicConfig>
+  }
+
   auth: {
     register(payload: RegisterPayload, opts?: RequestOpts): Promise<AuthResponse>
     login(payload: LoginPayload, opts?: RequestOpts): Promise<AuthResponse>
@@ -72,6 +83,13 @@ export interface ApiSurface {
     updateSection(sectionId: string, content: string): Promise<Profile>
     uploadCv(file: File, onProgress?: (percent: number) => void, signal?: AbortSignal): Promise<CvDocument>
     deleteCv(): Promise<void>
+    /**
+     * Record that the guided tour was finished or skipped.
+     *
+     * Returns the updated user so the caller can replace its cached copy
+     * instead of keeping a second source of truth for `tourCompletedAt`.
+     */
+    markTourCompleted(): Promise<User>
   }
 
   preferences: {

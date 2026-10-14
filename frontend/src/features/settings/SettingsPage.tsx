@@ -210,6 +210,19 @@ export function SettingsPage() {
               <Button onClick={() => void saveAccount()} disabled={savingAccount}>
                 {savingAccount ? "Saving…" : "Save changes"}
               </Button>
+
+              <hr />
+
+              <h3>Guided tour</h3>
+              <p className="hint">
+                A short walkthrough of the workspace. It is offered automatically the first
+                time you sign in, and you can run it again at any point.
+              </p>
+              {/* The tour itself lives in the workspace shell; `?tour=1` asks it
+                  to reopen. Dropped from the URL as soon as it is dismissed. */}
+              <Button kind="secondary" onClick={() => navigate("/overview?tour=1")}>
+                <Icon name="sparkle" size={14} /> Replay the tour
+              </Button>
             </>
           )}
 

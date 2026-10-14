@@ -77,7 +77,15 @@ All paths are relative to the API base (`/api`).
 ```jsonc
 // AuthResponse
 {
-  "user": { "id": 1, "email": "a@b.com", "fullName": "Armin Keller", "createdAt": "2026-01-01T09:00:00Z" },
+  "user": {
+    "id": 1,
+    "email": "a@b.com",
+    "fullName": "Armin Keller",
+    "createdAt": "2026-01-01T09:00:00Z",
+    // Null until the guided tour has been finished or skipped. The workspace
+    // reads this from the session payload, so it needs no extra request.
+    "tourCompletedAt": null
+  },
   "tokens": { "access": "…", "refresh": "…" }
 }
 ```
@@ -139,6 +147,11 @@ All paths are relative to the API base (`/api`).
 | `DELETE` | `/profile/cv/` | — | `204` |
 | `GET` | `/profile/preferences/` | — | `Preferences` |
 | `PUT` | `/profile/preferences/` | `Preferences` | `Preferences` |
+| `POST` | `/profile/tour-completed/` | — | `User` |
+
+`POST /profile/tour-completed/` records that the guided tour was finished or
+skipped, and returns the updated `User` so the client can replace its cached
+copy. It is idempotent: a repeat call does not move the original timestamp.
 
 ```jsonc
 // ProfileSection.key — one of:

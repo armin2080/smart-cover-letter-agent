@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
 import { useAuth } from "../../app/AuthProvider"
+import { useConfig } from "../../app/ConfigProvider"
 import { Button } from "../../components/ui/Button"
 import { Logo } from "../../components/ui/Common"
 import { Field } from "../../components/ui/Field"
@@ -32,6 +33,8 @@ export function AuthPage({ mode }: AuthPageProps) {
   const navigate = useNavigate()
   const location = useLocation()
   const { login, register } = useAuth()
+  const { config } = useConfig()
+  const registrationOpen = config.registrationEnabled
 
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
   const [submitted, setSubmitted] = useState(false)
@@ -210,9 +213,10 @@ export function AuthPage({ mode }: AuthPageProps) {
                 />{" "}
                 Remember me
               </label>
-              <a href="#forgot" onClick={(event) => event.preventDefault()}>
-                Forgot password?
-              </a>
+              {/* No self-service reset exists: there is no mail backend, and
+                  accounts are created by an administrator. A "Forgot password?"
+                  link would be a dead end, so this states the actual route. */}
+              <span className="form-meta-note">Lost your password? Ask an administrator.</span>
             </div>
           )}
 
@@ -221,10 +225,27 @@ export function AuthPage({ mode }: AuthPageProps) {
           </Button>
 
           <div className="switch-auth">
-            {isRegister ? "Already have an account?" : "New to SmartCover?"}{" "}
-            <button type="button" onClick={() => navigate(isRegister ? "/login" : "/register")}>
-              {isRegister ? "Log in" : "Create account"}
-            </button>
+            {isRegister ? (
+              <>
+                Already have an account?{" "}
+                <button type="button" onClick={() => navigate("/login")}>
+                  Log in
+                </button>
+              </>
+            ) : registrationOpen ? (
+              <>
+                New to SmartCover?{" "}
+                <button type="button" onClick={() => navigate("/register")}>
+                  Create account
+                </button>
+              </>
+            ) : (
+              // Invitation-only pilot: there is no signup to offer, so say how
+              // an account is actually obtained instead of showing a dead link.
+              <span className="switch-auth-note">
+                Accounts are created by invitation. Ask an administrator for access.
+              </span>
+            )}
           </div>
         </form>
       </div>

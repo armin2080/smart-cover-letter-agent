@@ -19,6 +19,7 @@ import type {
   Paginated,
   Preferences,
   Profile,
+  PublicConfig,
   RegisterPayload,
   SearchCriteria,
   SearchRun,
@@ -96,6 +97,15 @@ function uploadWithProgress<T>(
 /* -------------------------------------------------------------------------- */
 
 export const httpApi: ApiSurface = {
+  config: {
+    get(opts?: RequestOpts) {
+      return apiClient.get<PublicConfig>("/config/", {
+        anonymous: true,
+        signal: opts?.signal,
+      })
+    },
+  },
+
   auth: {
     register(payload: RegisterPayload, opts?: RequestOpts) {
       return apiClient.post<AuthResponse>("/auth/register/", payload, {
@@ -187,6 +197,10 @@ export const httpApi: ApiSurface = {
     },
     updateSection(sectionId: string, content: string) {
       return apiClient.patch<Profile>(`/profile/sections/${sectionId}/`, { content })
+    },
+    /** Record that the guided tour was finished or skipped. Idempotent. */
+    markTourCompleted() {
+      return apiClient.post<User>("/profile/tour-completed/")
     },
     uploadCv(file: File, onProgress?: (percent: number) => void, signal?: AbortSignal) {
       return uploadWithProgress<CvDocument>("/profile/cv/", file, "file", onProgress, signal)

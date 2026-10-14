@@ -305,11 +305,13 @@ export function FindJobsPage() {
                     <div>
                       <h3>Automatic search</h3>
                       <p>
-                        {settings.status === "error"
-                          ? "The last run failed — check your sources"
-                          : settings.enabled
-                            ? `Active and searching ${settings.frequency}`
-                            : "Paused — no scheduled searches"}
+                        {!settings.schedulerActive
+                          ? "Needs a scheduler on the server — see below"
+                          : settings.status === "error"
+                            ? "The last run failed — check your sources"
+                            : settings.enabled
+                              ? `Active and searching ${settings.frequency}`
+                              : "Paused — no scheduled searches"}
                       </p>
                     </div>
                   </div>
@@ -326,6 +328,15 @@ export function FindJobsPage() {
                 </div>
 
                 <hr />
+
+                {!settings.schedulerActive && settings.enabled && (
+                  <p className="schedule-warning">
+                    <Icon name="clock" size={14} /> This setting records your preference,
+                    but nothing runs it on a timer yet. Searches will only start when you
+                    run one. A scheduler needs to be enabled on the server for automatic
+                    searching to work.
+                  </p>
+                )}
 
                 <div className="auto-settings">
                   <div>
@@ -397,9 +408,11 @@ export function FindJobsPage() {
                   <p>
                     <small>Next scheduled search</small>
                     <b>
-                      {settings.enabled && settings.nextRunAt
-                        ? formatDateTime(settings.nextRunAt)
-                        : "Paused"}
+                      {!settings.enabled
+                        ? "Paused"
+                        : settings.schedulerActive && settings.nextRunAt
+                          ? formatDateTime(settings.nextRunAt)
+                          : "Not scheduled"}
                     </b>
                   </p>
                 </div>

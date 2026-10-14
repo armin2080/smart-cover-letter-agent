@@ -1,5 +1,6 @@
 import { useNavigate } from "react-router-dom"
 import { useAuth } from "../../app/AuthProvider"
+import { useConfig } from "../../app/ConfigProvider"
 import { Button } from "../../components/ui/Button"
 import { Badge, Company, Logo } from "../../components/ui/Common"
 import { Icon } from "../../components/ui/Icon"
@@ -146,8 +147,12 @@ function ProductPreview() {
 export function LandingPage() {
   const navigate = useNavigate()
   const { status } = useAuth()
+  const { config } = useConfig()
 
-  const primaryTarget = status === "authenticated" ? "/overview" : "/register"
+  // When registration is closed the only useful destination is the login
+  // screen: an account has to be created by an administrator first.
+  const registrationOpen = config.registrationEnabled
+  const primaryTarget = status === "authenticated" ? "/overview" : registrationOpen ? "/register" : "/login"
 
   return (
     <div className="landing">
@@ -166,7 +171,9 @@ export function LandingPage() {
               <Button kind="ghost" onClick={() => navigate("/login")}>
                 Log in
               </Button>
-              <Button onClick={() => navigate("/register")}>Get started</Button>
+              {registrationOpen && (
+                <Button onClick={() => navigate("/register")}>Get started</Button>
+              )}
             </>
           )}
         </div>
@@ -188,7 +195,8 @@ export function LandingPage() {
           </p>
           <div className="hero-actions">
             <Button onClick={() => navigate(primaryTarget)}>
-              Get Started <Icon name="arrow" size={16} />
+              {status === "authenticated" ? "Go to Workspace" : registrationOpen ? "Get Started" : "Log In"}{" "}
+              <Icon name="arrow" size={16} />
             </Button>
             <Button
               kind="secondary"
@@ -335,7 +343,8 @@ export function LandingPage() {
           <h2>Make your next application count.</h2>
           <p>Spend less time sorting through roles and more time pursuing the right ones.</p>
           <Button onClick={() => navigate(primaryTarget)}>
-            Get started for free <Icon name="arrow" size={16} />
+            {registrationOpen ? "Get started for free" : "Log in to your workspace"}{" "}
+            <Icon name="arrow" size={16} />
           </Button>
         </section>
       </main>

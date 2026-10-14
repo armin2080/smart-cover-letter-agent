@@ -50,7 +50,15 @@ export function ProviderStatusPanel({ compact = false }: { compact?: boolean }) 
 }
 
 function ProviderRow({ entry, compact }: { entry: ProviderStatus; compact: boolean }) {
-  const state = entry.operational ? "ready" : "disabled"
+  // A test-mode source is usable but not authorized, so it gets its own state
+  // rather than the green "ready" treatment. Showing it as fully ready would
+  // imply a permission that does not exist.
+  const testMode = entry.status === "enabled-for-testing"
+  const state = testMode ? "test" : entry.operational ? "ready" : "disabled"
+
+  // The test-mode warning matters even in the compact layout, so it is never
+  // hidden behind the `compact` flag.
+  const showDetail = !compact || testMode
 
   return (
     <li className={`provider-row provider-${state}`}>
@@ -58,9 +66,11 @@ function ProviderRow({ entry, compact }: { entry: ProviderStatus; compact: boole
       <div className="provider-body">
         <b>{entry.displayName}</b>
         <small>{entry.statusLabel}</small>
-        {!compact && <p>{entry.operational ? entry.detail : entry.termsNote}</p>}
+        {showDetail && <p>{entry.operational ? entry.detail : entry.termsNote}</p>}
       </div>
-      {entry.operational ? (
+      {testMode ? (
+        <Icon name="sparkle" size={14} />
+      ) : entry.operational ? (
         <Icon name="check" size={14} />
       ) : (
         <Icon name="shield" size={14} />

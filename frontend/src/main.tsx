@@ -2,6 +2,7 @@ import React from "react"
 import ReactDOM from "react-dom/client"
 import { BrowserRouter } from "react-router-dom"
 import { AuthProvider } from "./app/AuthProvider"
+import { ConfigProvider } from "./app/ConfigProvider"
 import { ErrorBoundary } from "./app/ErrorBoundary"
 import { mountCrashScreen } from "./app/crashScreen"
 import { ToastProvider } from "./app/ToastProvider"
@@ -59,13 +60,15 @@ window.addEventListener("unhandledrejection", (event) => {
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <ErrorBoundary>
-      <BrowserRouter>
-        <ToastProvider>
-          <AuthProvider>
-            <App />
-          </AuthProvider>
-        </ToastProvider>
-      </BrowserRouter>
+      <ConfigProvider>
+        <BrowserRouter>
+          <ToastProvider>
+            <AuthProvider>
+              <App />
+            </AuthProvider>
+          </ToastProvider>
+        </BrowserRouter>
+      </ConfigProvider>
     </ErrorBoundary>
   </React.StrictMode>,
 )

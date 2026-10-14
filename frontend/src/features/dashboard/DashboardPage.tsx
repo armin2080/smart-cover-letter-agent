@@ -80,13 +80,26 @@ export function DashboardPage() {
             </div>
             <div>
               <span className="status-line">
-                <b>Automatic search {stats.automaticSearchActive ? "is active" : "is paused"}</b>
-                <em>{stats.automaticSearchActive ? "Active" : "Paused"}</em>
+                {/* Three distinct states, not two. "Requested" and "actually
+                    scheduled" are different things: without a scheduler the
+                    countdown below would never arrive. */}
+                <b>
+                  {!stats.automaticSearchActive
+                    ? "Automatic search is paused"
+                    : stats.schedulerActive
+                      ? "Automatic search is active"
+                      : "Automatic search is on, but not scheduled"}
+                </b>
+                <em>
+                  {!stats.automaticSearchActive ? "Paused" : stats.schedulerActive ? "Active" : "No scheduler"}
+                </em>
               </span>
               <p>
-                {stats.automaticSearchActive
-                  ? "We'll keep looking for relevant roles based on your preferences."
-                  : "No searches are scheduled until you re-enable automatic search."}
+                {!stats.automaticSearchActive
+                  ? "No searches are scheduled until you re-enable automatic search."
+                  : stats.schedulerActive
+                    ? "We'll keep looking for relevant roles based on your preferences."
+                    : "You'll get matches when you run a search yourself. Automatic searching needs a scheduler to be started on the server."}
               </p>
             </div>
             <div className="status-times">
@@ -97,7 +110,13 @@ export function DashboardPage() {
               <span>
                 <small>Next search</small>
                 <b>
-                  {stats.nextSearchAt ? relativeTime(stats.nextSearchAt) : "Not scheduled"}
+                  {!stats.automaticSearchActive
+                    ? "Not scheduled"
+                    : stats.schedulerActive
+                      ? stats.nextSearchAt
+                        ? relativeTime(stats.nextSearchAt)
+                        : "Not scheduled"
+                      : "Not scheduled"}
                 </b>
               </span>
             </div>

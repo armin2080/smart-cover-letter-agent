@@ -38,6 +38,7 @@ import type {
   Paginated,
   Preferences,
   Profile,
+  PublicConfig,
   SearchRun,
   StageState,
   TaskStage,
@@ -291,6 +292,14 @@ function appendInstruction(content: string, instructions?: string): string {
 /* -------------------------------------------------------------------------- */
 
 export const mockApi: ApiSurface = {
+  config: {
+    async get(): Promise<PublicConfig> {
+      // Mirrors the backend default so the mock behaves like a real pilot
+      // deployment: registration closed.
+      return { registrationEnabled: false }
+    },
+  },
+
   auth: {
     async register(payload): Promise<AuthResponse> {
       await delay(650)
@@ -423,7 +432,9 @@ export const mockApi: ApiSurface = {
         ],
         automaticSearchActive: state.auto.enabled,
         lastSearchAt: state.auto.lastRunAt,
-        nextSearchAt: state.auto.enabled ? state.auto.nextRunAt : null,
+        // Only promise a next run when something would actually trigger it.
+        nextSearchAt: state.auto.enabled && state.auto.schedulerActive ? state.auto.nextRunAt : null,
+        schedulerActive: state.auto.schedulerActive,
       }
     },
 
@@ -582,6 +593,12 @@ export const mockApi: ApiSurface = {
     async deleteCv() {
       await delay(250)
       state.profile.cv = null
+    },
+
+    async markTourCompleted(): Promise<User> {
+      await delay(250)
+      state.user = { ...state.user, tourCompletedAt: new Date().toISOString() }
+      return clone(state.user)
     },
   },
 

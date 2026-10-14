@@ -354,6 +354,10 @@ export const SEED_USER: User = {
   email: "armin.keller@example.com",
   fullName: "Armin Keller",
   createdAt: daysAgo(120),
+  // An established account, so the mock transport behaves like a returning
+  // user: the guided tour does not interrupt every reload. Use "Replay the
+  // tour" in Settings to see it.
+  tourCompletedAt: daysAgo(119),
 }
 
 export const SEED_PROFILE: Profile = {
@@ -544,6 +548,15 @@ export const SEED_SEARCH_HISTORY: SearchRun[] = [
   },
 ]
 
+/**
+ * Whether the mock transport pretends a scheduler is running.
+ *
+ * False mirrors a real install with no cron entry: the preference is saved but
+ * nothing fires on a timer, so the UI shows the honest "not scheduled" state
+ * rather than a countdown. Flip it to see the other state.
+ */
+const MOCK_SCHEDULER_ACTIVE = false
+
 export const SEED_AUTO_SETTINGS: AutoSearchSettings = {
   enabled: true,
   frequency: "daily",
@@ -553,6 +566,9 @@ export const SEED_AUTO_SETTINGS: AutoSearchSettings = {
   status: "active",
   lastRunAt: hoursAgo(5),
   nextRunAt: new Date(new Date().setHours(8, 30, 0, 0) + 24 * 3_600_000).toISOString(),
+  // The mock transport has no scheduler behind it either, so it reports the
+  // same honest state as a real install without cron.
+  schedulerActive: MOCK_SCHEDULER_ACTIVE,
 }
 
 export const SEED_NOTIFICATIONS: NotificationSettings = {

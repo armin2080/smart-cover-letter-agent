@@ -31,6 +31,13 @@ export interface User {
   email: string
   fullName: string
   createdAt: string
+  /**
+   * When the guided tour was finished or skipped, or null if not seen yet.
+   *
+   * Held on the account rather than in browser storage, so signing in from a
+   * second device does not replay the tour.
+   */
+  tourCompletedAt?: string | null
 }
 
 export interface AuthTokens {
@@ -164,6 +171,14 @@ export interface JobStats {
   automaticSearchActive: boolean
   lastSearchAt: string | null
   nextSearchAt: string | null
+  /**
+   * Whether an external scheduler actually runs the searches.
+   *
+   * `automaticSearchActive` only means the *user* asked for automatic search.
+   * Without a scheduler nothing fires on a timer, so `nextSearchAt` is an
+   * intention rather than a promise.
+   */
+  schedulerActive: boolean
 }
 
 export interface ActivityEntry {
@@ -273,6 +288,8 @@ export interface AutoSearchSettings {
   status: "active" | "paused" | "error"
   lastRunAt: string | null
   nextRunAt: string | null
+  /** Whether a scheduler is actually wired up to run the searches. */
+  schedulerActive: boolean
 }
 
 /* -------------------------------------------------------------------------- */
@@ -326,4 +343,19 @@ export interface AccountUpdate {
   email?: string
   currentPassword?: string
   newPassword?: string
+}
+
+/* -------------------------------------------------------------------------- */
+/* Public configuration                                                       */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Feature flags read before anyone signs in.
+ *
+ * Served by `GET /api/config/`, which is deliberately unauthenticated — the
+ * login screen has to know whether to offer a signup link.
+ */
+export interface PublicConfig {
+  /** Whether visitors may create their own account. */
+  registrationEnabled: boolean
 }

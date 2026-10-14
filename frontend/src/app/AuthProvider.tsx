@@ -22,6 +22,8 @@ interface AuthContextValue {
   register(payload: RegisterPayload): Promise<void>
   logout(): Promise<void>
   updateAccount(payload: AccountUpdate): Promise<void>
+  /** Record that the guided tour was finished or skipped. */
+  markTourCompleted(): Promise<void>
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
@@ -100,9 +102,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(updated)
   }, [])
 
+  /**
+   * Mark the guided tour as seen (finished or skipped).
+   *
+   * Updates the cached user so the tour does not reappear on the next
+   * navigation. A failure is deliberately not surfaced: the tour has already
+   * been dismissed on screen, and the only cost of a failed call is seeing it
+   * once more next session.
+   */
+  const markTourCompleted = useCallback(async () => {
+    try {
+      setUser(await api.profile.markTourCompleted())
+    } catch {
+      /* leave the local state alone; the tour stays dismissed for this session */
+    }
+  }, [])
+
   const value = useMemo<AuthContextValue>(
-    () => ({ user, status, isMock: isMockMode, login, register, logout, updateAccount }),
-    [user, status, login, register, logout, updateAccount],
+    () => ({
+      user,
+      status,
+      isMock: isMockMode,
+      login,
+      register,
+      logout,
+      updateAccount,
+      markTourCompleted,
+    }),
+    [user, status, login, register, logout, updateAccount, markTourCompleted],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

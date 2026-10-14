@@ -1,7 +1,9 @@
-import { useState, type ReactNode } from "react"
+import { useCallback, useState, type ReactNode } from "react"
 import { Outlet, useLocation, useNavigate } from "react-router-dom"
 import { Icon } from "../ui/Icon"
 import { Logo } from "../ui/Common"
+import { Tour } from "../tour/Tour"
+import { WORKSPACE_TOUR } from "../tour/steps"
 import { useAuth } from "../../app/AuthProvider"
 import { useAsync } from "../../hooks/useAsync"
 import { api, isMockMode } from "../../services/api"
@@ -49,7 +51,7 @@ interface ShellProps {
 export function Shell({ children }: ShellProps) {
   const navigate = useNavigate()
   const location = useLocation()
-  const { user, logout } = useAuth()
+  const { user, logout, markTourCompleted } = useAuth()
 
   const [collapsed, setCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -58,6 +60,25 @@ export function Shell({ children }: ShellProps) {
 
   const { data: counts } = useAsync((signal) => api.jobs.counts({ signal }), [])
   const { data: activity } = useAsync((signal) => api.jobs.activity(4, { signal }), [])
+
+  // ------------------------------------------------------------------ tour --
+  //
+  // Offered once per account: `tourCompletedAt` is null until it has been
+  // finished or skipped. `?tour=1` replays it on demand from Settings, which is
+  // what the closing step promises. `tourDismissed` is separate from the server
+  // flag so the panel closes immediately on click rather than reappearing
+  // during the round trip that persists the choice.
+  const [tourDismissed, setTourDismissed] = useState(false)
+  const tourRequested = new URLSearchParams(location.search).get("tour") === "1"
+  const tourUnseen = Boolean(user) && user?.tourCompletedAt == null
+  const showTour = !tourDismissed && (tourUnseen || tourRequested)
+
+  const closeTour = useCallback(() => {
+    setTourDismissed(true)
+    void markTourCompleted()
+    // Drop the replay parameter so a reload does not reopen the tour.
+    if (tourRequested) navigate(location.pathname, { replace: true })
+  }, [markTourCompleted, tourRequested, navigate, location.pathname])
 
   // Use the first path segment so parameterised routes (e.g. /cover/12) resolve correctly.
   const currentPath = location.pathname.split("/").filter(Boolean)[0] ?? "overview"
@@ -81,7 +102,13 @@ export function Shell({ children }: ShellProps) {
     currentPath === item.path || (currentPath === "cover" && item.path === "jobs")
 
   const renderNavItem = (item: NavItem) => (
-    <button className={isActive(item) ? "active" : ""} onClick={() => go(item.path)} key={item.path}>
+    <button
+      className={isActive(item) ? "active" : ""}
+      onClick={() => go(item.path)}
+      key={item.path}
+      // Anchor for the guided tour.
+      data-tour={`nav-${item.path}`}
+    >
       <Icon name={item.icon} />
       {!collapsed && <span>{item.label}</span>}
       {!collapsed && item.path === "jobs" && counts?.new ? <em className="nav-count">{counts.new}</em> : null}
@@ -139,6 +166,7 @@ export function Shell({ children }: ShellProps) {
               className="icon-button"
               aria-label="Notifications"
               aria-expanded={notificationsOpen}
+              data-tour="topbar-notifications"
               onClick={() => {
                 setNotificationsOpen((open) => !open)
                 setAccountOpen(false)
@@ -210,6 +238,8 @@ export function Shell({ children }: ShellProps) {
 
         <div className="page-content">{children ?? <Outlet />}</div>
       </div>
+
+      {showTour && <Tour steps={WORKSPACE_TOUR} onFinish={closeTour} />}
     </div>
   )
 }

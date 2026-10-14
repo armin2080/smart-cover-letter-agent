@@ -1,6 +1,164 @@
 /** Application-shell additions layered on top of the base stylesheet. */
 
+/* Shown in place of a password-reset link, which does not exist. Reads as
+   guidance rather than as a disabled control. */
+.form-meta-note {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* Honest-state notices --------------------------------------------------- */
+
+/* Shown where a feature is configured but not actually running, so the UI
+   never implies something will happen that will not. Amber, not red: this is
+   a deliberate configuration state, not an error. */
+.schedule-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0 0 18px;
+  padding: 11px 13px;
+  border: 1px solid #e8d9b0;
+  border-radius: 8px;
+  background: #fdfaf2;
+  color: #7a6420;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.schedule-warning .icon {
+  flex: none;
+  margin-top: 1px;
+}
+
+/* Guided tour -------------------------------------------------------------
+   The spotlight is built from four shade panels around the target rather than
+   one overlay with a hole, so the highlighted element keeps its own contrast
+   and never needs a mask image. */
+
+.tour-root {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+}
+
+.tour-shade {
+  position: fixed;
+  background: rgba(16, 24, 34, 0.62);
+}
+
+/* Sits between the shade panels and the target, so the highlighted element
+   reads as "lifted" rather than merely uncovered. */
+.tour-ring {
+  position: fixed;
+  border-radius: 10px;
+  box-shadow: 0 0 0 2px var(--teal), 0 0 0 6px rgba(41, 155, 141, 0.25);
+  pointer-events: none;
+  transition: top 0.18s ease, left 0.18s ease, width 0.18s ease, height 0.18s ease;
+}
+
+.tour-panel {
+  position: fixed;
+  background: #fff;
+  border-radius: 12px;
+  padding: 20px 22px 16px;
+  box-shadow: 0 18px 48px rgba(16, 24, 34, 0.28);
+  outline: none;
+}
+
+.tour-step-count {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--teal);
+}
+
+.tour-panel h3 {
+  margin: 8px 0 6px;
+  font-size: 17px;
+}
+
+.tour-panel p {
+  margin: 0 0 18px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+.tour-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.tour-skip {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--muted);
+  font-size: 12px;
+  text-decoration: underline;
+}
+
+.tour-actions > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tour-back {
+  border: 1px solid var(--border);
+  background: #fff;
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 13px;
+}
+
+.tour-next {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  border-radius: 8px;
+  padding: 8px 14px;
+  background: var(--navy);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.tour-dots {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 16px;
+}
+
+.tour-dots i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--border);
+}
+
+.tour-dots i.active {
+  background: var(--teal);
+}
+
 /* Auth / session ---------------------------------------------------------- */
+
+/* Shown on the login screen when registration is closed, in place of the
+   "create account" link. Reads as guidance rather than as an error. */
+.switch-auth-note {
+  display: block;
+  margin: 0 auto;
+  max-width: 300px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+}
 
 .page-loader {
   min-height: 60vh;
@@ -602,6 +760,26 @@
 
 .provider-disabled > .icon {
   color: var(--muted);
+}
+
+/* Test mode: usable, but not authorized. Deliberately amber rather than the
+   green used for a properly authorized source, so the two are never confused
+   at a glance. */
+.provider-test {
+  border-color: #e8d9b0;
+  background: #fdfaf2;
+}
+
+.provider-test > .icon {
+  color: #9a7b1f;
+}
+
+.provider-test .provider-dot {
+  background: #d8a92c;
+}
+
+.provider-test .provider-body p {
+  color: #7a6420;
 }
 
 .provider-dot {

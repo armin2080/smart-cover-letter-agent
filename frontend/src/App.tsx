@@ -1,5 +1,5 @@
 import { Navigate, Route, Routes } from "react-router-dom"
-import { RequireAuth, RequireGuest } from "./app/RouteGuards"
+import { RequireAuth, RequireGuest, RequireRegistrationOpen } from "./app/RouteGuards"
 import { Shell } from "./components/layout/Shell"
 import { AuthPage } from "./features/auth/AuthPage"
 import { CoverLetterPage } from "./features/cover-letter/CoverLetterPage"
@@ -27,9 +27,11 @@ export default function App() {
       <Route
         path="/register"
         element={
-          <RequireGuest>
-            <AuthPage mode="register" />
-          </RequireGuest>
+          <RequireRegistrationOpen>
+            <RequireGuest>
+              <AuthPage mode="register" />
+            </RequireGuest>
+          </RequireRegistrationOpen>
         }
       />
 
