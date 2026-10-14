@@ -3,6 +3,7 @@
 from datetime import timedelta
 from pathlib import Path
 
+from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
 
 import os
@@ -40,6 +41,15 @@ SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "dev-only-insecure-change-me")
 DEBUG = env_bool("DJANGO_DEBUG", True)
 ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS", ["localhost", "127.0.0.1", "[::1]", "testserver"])
 
+# Fail loudly rather than run in production with the shipped development key.
+# A predictable SECRET_KEY lets anyone forge session cookies and signed tokens,
+# so the failure mode is silent and severe — better to refuse to boot.
+if not DEBUG and SECRET_KEY == "dev-only-insecure-change-me":
+    raise ImproperlyConfigured(
+        "DJANGO_SECRET_KEY must be set when DJANGO_DEBUG is false. "
+        "Generate one with: python -c 'import secrets; print(secrets.token_urlsafe(64))'"
+    )
+
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
@@ -64,6 +74,10 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
+    # Serves collected static files in production, where DEBUG is off and
+    # Django's staticfiles app no longer does it. Without this the admin
+    # renders unstyled. Must sit directly after SecurityMiddleware.
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -135,6 +149,39 @@ STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
+
+# Whitenoise serves and compresses the collected static files in production.
+# The manifest backend hashes filenames so they can be cached indefinitely;
+# `collectstatic` must therefore run before the app starts.
+STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+}
+
+# --------------------------------------------------------------------------- #
+# Reverse-proxy awareness                                                     #
+# --------------------------------------------------------------------------- #
+#
+# Cloudflare terminates TLS at its edge and forwards to cloudflared, which
+# connects to gunicorn over plain HTTP on loopback. Without the header below
+# Django believes the request arrived over HTTP, so `request.is_secure()` is
+# False and CSRF rejects every POST — logins fail with an unhelpful 403.
+
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+USE_X_FORWARDED_HOST = True
+
+# Cookies are only marked Secure in production, so local development over
+# http:// still works.
+SESSION_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SECURE = not DEBUG
+
+# Cloudflare terminates TLS, so no redirect is needed; asking for one here
+# would loop.
+SECURE_SSL_REDIRECT = False
 
 # --------------------------------------------------------------------------- #
 # Django REST Framework                                                       #

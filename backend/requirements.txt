@@ -27,3 +27,7 @@ python-docx>=1.1
 
 # Cover letter PDF rendering
 reportlab>=4.2
+
+# Static file serving in production (DEBUG=False). Without this, Django's
+# staticfiles app stops serving /static/ and the admin renders unstyled.
+whitenoise>=6.7
