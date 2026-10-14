@@ -103,11 +103,24 @@ def authorization_reference(provider: str) -> str:
     return (getattr(settings, _setting_name(provider, "AUTHORIZATION_REFERENCE"), "") or "").strip()
 
 
+def is_test_mode() -> bool:
+    """Whether `PROVIDER_TEST_MODE` is on.
+
+    Test mode waives the recorded-authorization requirement so an operator can
+    exercise the adapters. It does not claim any permission: a provider it
+    enables resolves to `ENABLED_FOR_TESTING`, which is operational but never
+    reports as authorized.
+    """
+
+    return bool(getattr(settings, "PROVIDER_TEST_MODE", False))
+
+
 def get_provider_status(provider: str) -> ProviderStatus:
     """Resolve the effective status of one provider.
 
     The order of checks matters: a missing authorization outranks an explicit
-    enable, so the system fails closed.
+    enable, so the system fails closed unless test mode was turned on
+    deliberately.
     """
 
     config = PROVIDERS.get(provider)
@@ -122,6 +135,14 @@ def get_provider_status(provider: str) -> ProviderStatus:
         return ProviderStatus.DISABLED_BY_CONFIG
 
     if not authorization_reference(provider):
+        if is_test_mode():
+            logger.warning(
+                "Provider %s is enabled for TESTING only: PROVIDER_TEST_MODE is on and "
+                "no authorization is recorded. This is not permission to collect.",
+                provider,
+            )
+            return ProviderStatus.ENABLED_FOR_TESTING
+
         logger.warning(
             "Provider %s is enabled but has no recorded authorization reference; "
             "live collection remains disabled.",
@@ -135,11 +156,11 @@ def get_provider_status(provider: str) -> ProviderStatus:
 def get_adapter(provider: str) -> JobSourceAdapter | None:
     """Return an adapter instance, or None when it must not be used.
 
-    Returns None for any status other than READY, so a caller cannot
+    Returns None for any non-operational status, so a caller cannot
     accidentally bypass the gate by ignoring the status.
     """
 
-    if get_provider_status(provider) is not ProviderStatus.READY:
+    if not get_provider_status(provider).is_operational:
         return None
 
     # Imported lazily so a broken optional adapter cannot break the registry.
@@ -170,7 +191,7 @@ def get_adapter(provider: str) -> JobSourceAdapter | None:
 def available_providers() -> list[str]:
     """Providers whose adapters may actually be used right now."""
 
-    return [name for name in PROVIDERS if get_provider_status(name) is ProviderStatus.READY]
+    return [name for name in PROVIDERS if get_provider_status(name).is_operational]
 
 
 def enabled_provider_names() -> list[str]:
@@ -196,6 +217,11 @@ def provider_health() -> list[SourceHealth]:
             detail = "Live collection disabled: no written platform authorization is on record."
         elif status is ProviderStatus.DISABLED_BY_CONFIG:
             detail = "Disabled by configuration."
+        elif status is ProviderStatus.ENABLED_FOR_TESTING:
+            detail = (
+                "TEST MODE: collection is switched on with no authorization on record. "
+                "For evaluation only — this is not permission. " + config.terms_note
+            )
 
         snapshot.append(
             SourceHealth(source=name, status=status, detail=detail, checked_at=timezone.now())

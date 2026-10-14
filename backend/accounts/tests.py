@@ -1,6 +1,7 @@
 """Tests for authentication, profile, CV, preferences and notifications."""
 
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import override_settings
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
@@ -10,6 +11,18 @@ from .models import Profile, ProfileSection, User
 VALID_PASSWORD = "test-pass-123"
 
 
+def registration_open():
+    """Enable self-service signup for tests that exercise the signup flow.
+
+    Registration is off by default, so a test about *how* registration behaves
+    has to state that precondition explicitly. The closed-by-default behaviour
+    has its own class below.
+    """
+
+    return override_settings(REGISTRATION_ENABLED=True)
+
+
+@registration_open()
 class AuthTests(APITestCase):
     def test_register_creates_user_with_defaults_and_tokens(self):
         response = self.client.post(
@@ -165,6 +178,151 @@ class AuthTests(APITestCase):
             format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+
+class RegistrationGateTests(APITestCase):
+    """Self-service registration is closed unless it is switched on.
+
+    The pilot is invitation-only: accounts are created deliberately through the
+    admin panel, and an open signup form would let anyone who finds the URL in.
+    These tests run with the shipped defaults, so they fail if that default is
+    ever changed to allow open signup.
+    """
+
+    PAYLOAD = {
+        "fullName": "Curious Visitor",
+        "email": "visitor@example.com",
+        "password": VALID_PASSWORD,
+        "passwordConfirm": VALID_PASSWORD,
+        "acceptedTerms": True,
+    }
+
+    def test_registration_is_disabled_by_default(self):
+        from django.conf import settings
+
+        self.assertFalse(settings.REGISTRATION_ENABLED)
+
+    def test_register_is_refused_when_disabled(self):
+        response = self.client.post(reverse("auth-register"), self.PAYLOAD, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(response.data["code"], "registration_disabled")
+        self.assertFalse(User.objects.filter(email="visitor@example.com").exists())
+
+    def test_register_returns_no_tokens_when_disabled(self):
+        response = self.client.post(reverse("auth-register"), self.PAYLOAD, format="json")
+        self.assertNotIn("tokens", response.data)
+
+    def test_register_succeeds_when_enabled(self):
+        with override_settings(REGISTRATION_ENABLED=True):
+            response = self.client.post(reverse("auth-register"), self.PAYLOAD, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(User.objects.filter(email="visitor@example.com").exists())
+
+    def test_config_endpoint_is_public_and_reports_the_flag(self):
+        response = self.client.get(reverse("public-config"))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(response.data["registrationEnabled"])
+
+    def test_config_endpoint_reflects_the_enabled_state(self):
+        with override_settings(REGISTRATION_ENABLED=True):
+            response = self.client.get(reverse("public-config"))
+
+        self.assertTrue(response.data["registrationEnabled"])
+
+    def test_config_endpoint_needs_no_authentication(self):
+        """The login screen has to read it before any session exists."""
+
+        response = self.client.get(reverse("public-config"))
+        self.assertNotEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_config_exposes_nothing_beyond_the_public_flag(self):
+        response = self.client.get(reverse("public-config"))
+        self.assertEqual(set(response.data), {"registrationEnabled"})
+
+    def test_login_still_works_while_registration_is_closed(self):
+        """Closing signup must not lock existing users out."""
+
+        User.objects.create_user(email="existing@example.com", password=VALID_PASSWORD)
+        response = self.client.post(
+            reverse("auth-login"),
+            {"email": "existing@example.com", "password": VALID_PASSWORD},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn("tokens", response.data)
+
+
+class TourStateTests(APITestCase):
+    """The guided tour is offered once per account.
+
+    State lives on the account, not in browser storage, so signing in from a
+    second device does not replay it.
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="tour@example.com", password=VALID_PASSWORD, full_name="Tour User"
+        )
+        self.client.force_authenticate(self.user)
+
+    def test_new_account_has_not_seen_the_tour(self):
+        response = self.client.get(reverse("auth-me"))
+        self.assertIsNone(response.data["tourCompletedAt"])
+
+    def test_marking_complete_records_a_timestamp(self):
+        response = self.client.post(reverse("profile-tour-completed"))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIsNotNone(response.data["tourCompletedAt"])
+
+        self.user.profile.refresh_from_db()
+        self.assertIsNotNone(self.user.profile.tour_completed_at)
+
+    def test_marking_complete_is_idempotent(self):
+        """A double-click or a retry must not move the original timestamp."""
+
+        first = self.client.post(reverse("profile-tour-completed")).data["tourCompletedAt"]
+        second = self.client.post(reverse("profile-tour-completed")).data["tourCompletedAt"]
+        self.assertEqual(first, second)
+
+    def test_the_state_survives_a_later_me_request(self):
+        self.client.post(reverse("profile-tour-completed"))
+        self.assertIsNotNone(self.client.get(reverse("auth-me")).data["tourCompletedAt"])
+
+    def test_it_requires_authentication(self):
+        self.client.force_authenticate(None)
+        response = self.client.post(reverse("profile-tour-completed"))
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_it_returns_the_updated_user(self):
+        """The client replaces its cached user from this response."""
+
+        response = self.client.post(reverse("profile-tour-completed"))
+        for field in ("id", "email", "fullName", "tourCompletedAt"):
+            self.assertIn(field, response.data)
+
+    def test_one_users_tour_state_does_not_affect_another(self):
+        self.client.post(reverse("profile-tour-completed"))
+
+        other = User.objects.create_user(email="other@example.com", password=VALID_PASSWORD)
+        self.client.force_authenticate(other)
+        self.assertIsNone(self.client.get(reverse("auth-me")).data["tourCompletedAt"])
+
+    def test_login_payload_carries_the_tour_state(self):
+        """The tour decision is made from the session payload, not a second call."""
+
+        self.client.post(reverse("profile-tour-completed"))
+        self.client.force_authenticate(None)
+
+        response = self.client.post(
+            reverse("auth-login"),
+            {"email": "tour@example.com", "password": VALID_PASSWORD},
+            format="json",
+        )
+        self.assertIsNotNone(response.data["user"]["tourCompletedAt"])
 
 
 class ProfileTests(APITestCase):

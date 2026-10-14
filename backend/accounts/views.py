@@ -7,6 +7,7 @@ from pathlib import Path
 
 from django.conf import settings
 from django.db import transaction
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
@@ -14,7 +15,7 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenRefreshView
 
-from config.serializers import EmptySerializer, LogoutSerializer
+from config.serializers import EmptySerializer, LogoutSerializer, PublicConfigSerializer
 
 from .cv_parser import parse_cv
 from .models import (
@@ -56,15 +57,52 @@ def auth_payload(user: User, request=None) -> dict:
 # --------------------------------------------------------------------------- #
 
 
+class PublicConfigView(APIView):
+    """GET /api/config/ — feature flags the frontend needs before signing in.
+
+    Unauthenticated by design: the login screen has to know whether to offer a
+    "create account" link. Only ever exposes non-sensitive booleans.
+    """
+
+    permission_classes = [AllowAny]
+    authentication_classes: list = []
+    serializer_class = PublicConfigSerializer
+
+    def get(self, request):
+        return Response(
+            {
+                "registrationEnabled": settings.REGISTRATION_ENABLED,
+            }
+        )
+
+
 class RegisterView(APIView):
-    """POST /api/auth/register/ — create an account and return a session."""
+    """POST /api/auth/register/ — create an account and return a session.
+
+    Refused unless self-service registration is switched on. The pilot runs
+    invitation-only: accounts are created deliberately through the admin panel,
+    and an open signup form would let anyone who finds the URL in.
+    """
 
     permission_classes = [AllowAny]
     authentication_classes: list = []
     serializer_class = RegisterSerializer
 
-    @transaction.atomic
     def post(self, request):
+        if not settings.REGISTRATION_ENABLED:
+            return Response(
+                {
+                    "detail": "Registration is closed. Ask an administrator to create "
+                    "an account for you.",
+                    "code": "registration_disabled",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        return self._register(request)
+
+    @transaction.atomic
+    def _register(self, request):
         serializer = RegisterSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
@@ -171,6 +209,34 @@ class ProfileView(APIView):
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(serializer.data)
+
+
+class TourCompletedView(APIView):
+    """POST /api/profile/tour-completed/ — record that the guided tour is done.
+
+    Called when the tour is finished *or* skipped; both mean "do not show this
+    again". Idempotent, so a duplicate request from a double-click or a retry
+    does not move the original timestamp.
+    """
+
+    serializer_class = UserSerializer
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        profile, _ = Profile.objects.get_or_create(user=request.user)
+        if profile.tour_completed_at is None:
+            profile.tour_completed_at = timezone.now()
+            profile.save(update_fields=["tour_completed_at"])
+
+        # Point the reverse relation at the instance just updated. Without this
+        # the serializer can read a stale cached `user.profile` from earlier in
+        # the request and report the tour as still unseen, even though the row
+        # was written.
+        request.user.profile = profile
+
+        # The updated user, so the client can replace its cached copy instead of
+        # keeping a second source of truth.
+        return Response(UserSerializer(request.user).data)
 
 
 class ProfileSectionDetailView(APIView):

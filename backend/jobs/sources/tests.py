@@ -635,6 +635,84 @@ class AuthorizationGateTests(TestCase):
         )
 
 
+@platform_providers_disabled()
+class ProviderTestModeTests(TestCase):
+    """`PROVIDER_TEST_MODE` lets an operator evaluate the adapters.
+
+    It waives the recorded-authorization requirement but must never be
+    mistaken for authorization: a provider it enables reports
+    ENABLED_FOR_TESTING, which is operational yet explicitly not authorized.
+    """
+
+    ENABLED_NO_AUTH = dict(
+        PROVIDER_LINKEDIN_ENABLED=True,
+        PROVIDER_LINKEDIN_AUTHORIZATION_REFERENCE="",
+    )
+
+    def test_test_mode_is_off_by_default(self):
+        from django.conf import settings
+
+        self.assertFalse(settings.PROVIDER_TEST_MODE)
+
+    def test_enabled_without_authorization_stays_disabled_when_test_mode_is_off(self):
+        with override_settings(**self.ENABLED_NO_AUTH):
+            status_ = get_provider_status("linkedin")
+            self.assertEqual(status_, ProviderStatus.DISABLED_AUTHORIZATION_PENDING)
+            self.assertFalse(status_.is_operational)
+
+    def test_test_mode_makes_an_unauthorized_provider_usable(self):
+        with override_settings(PROVIDER_TEST_MODE=True, **self.ENABLED_NO_AUTH):
+            status_ = get_provider_status("linkedin")
+            self.assertEqual(status_, ProviderStatus.ENABLED_FOR_TESTING)
+            self.assertTrue(status_.is_operational)
+            self.assertIsNotNone(get_adapter("linkedin"))
+
+    def test_test_mode_status_is_never_reported_as_authorized(self):
+        with override_settings(PROVIDER_TEST_MODE=True, **self.ENABLED_NO_AUTH):
+            status_ = get_provider_status("linkedin")
+            self.assertFalse(status_.is_authorized)
+            self.assertNotEqual(status_, ProviderStatus.READY)
+
+    def test_test_mode_does_not_override_an_explicit_disable(self):
+        """Turning test mode on must not switch anything on by itself."""
+
+        with override_settings(PROVIDER_TEST_MODE=True):
+            self.assertEqual(get_provider_status("linkedin"), ProviderStatus.DISABLED_BY_CONFIG)
+            self.assertIsNone(get_adapter("linkedin"))
+
+    def test_a_real_authorization_still_wins_over_test_mode(self):
+        with override_settings(
+            PROVIDER_TEST_MODE=True,
+            PROVIDER_LINKEDIN_ENABLED=True,
+            PROVIDER_LINKEDIN_AUTHORIZATION_REFERENCE="CONTRACT-2026-0142",
+        ):
+            status_ = get_provider_status("linkedin")
+            self.assertEqual(status_, ProviderStatus.READY)
+            self.assertTrue(status_.is_authorized)
+
+    def test_test_mode_is_announced_in_the_health_detail(self):
+        """The UI must be able to explain why an unauthorized source is live."""
+
+        with override_settings(PROVIDER_TEST_MODE=True, **self.ENABLED_NO_AUTH):
+            snapshot = {entry.source: entry for entry in provider_health()}
+
+        linkedin = snapshot["linkedin"]
+        self.assertEqual(linkedin.status, ProviderStatus.ENABLED_FOR_TESTING)
+        self.assertIn("TEST MODE", linkedin.detail)
+        self.assertIn("not permission", linkedin.detail)
+
+    def test_test_mode_label_says_no_authorization(self):
+        label = ProviderStatus.ENABLED_FOR_TESTING.label
+        self.assertIn("Test mode", label)
+        self.assertIn("no authorization", label)
+
+    def test_manual_import_is_unaffected_by_test_mode(self):
+        """The manual path needs no authorization and is always available."""
+
+        self.assertEqual(get_provider_status("manual"), ProviderStatus.READY)
+        self.assertTrue(get_provider_status("manual").is_authorized)
+
+
 # --------------------------------------------------------------------------- #
 # Pipeline                                                                    #
 # --------------------------------------------------------------------------- #

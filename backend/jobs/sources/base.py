@@ -87,6 +87,16 @@ class ProviderStatus(str, enum.Enum):
     READY = "ready"
     """Implemented, fixture-tested, and authorised for live collection."""
 
+    ENABLED_FOR_TESTING = "enabled-for-testing"
+    """Switched on through `PROVIDER_TEST_MODE`, which waives the recorded
+    authorization requirement so the adapters can be evaluated before any
+    agreement exists.
+
+    It is usable, so the pipeline treats it as operational, but it is
+    deliberately **not** READY: no authorization covers this collection, and
+    every surface that reports status must say so.
+    """
+
     DISABLED_AUTHORIZATION_PENDING = "disabled-authorization-pending"
     """Implemented and fixture-tested, but no written platform authorisation
     exists, so live collection is switched off."""
@@ -102,7 +112,16 @@ class ProviderStatus(str, enum.Enum):
 
     @property
     def is_operational(self) -> bool:
-        """True only when live collection is both permitted and working."""
+        """True when the adapter may actually be called right now.
+
+        Covers both the authorised case and the explicit test override.
+        """
+
+        return self in {ProviderStatus.READY, ProviderStatus.ENABLED_FOR_TESTING}
+
+    @property
+    def is_authorized(self) -> bool:
+        """True only when a recorded authorization covers this collection."""
 
         return self is ProviderStatus.READY
 
@@ -110,6 +129,7 @@ class ProviderStatus(str, enum.Enum):
     def label(self) -> str:
         return {
             ProviderStatus.READY: "Ready",
+            ProviderStatus.ENABLED_FOR_TESTING: "Test mode — no authorization",
             ProviderStatus.DISABLED_AUTHORIZATION_PENDING: "Disabled — authorization pending",
             ProviderStatus.DISABLED_BY_CONFIG: "Disabled by configuration",
             ProviderStatus.TEMPORARILY_UNAVAILABLE: "Temporarily unavailable",

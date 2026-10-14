@@ -206,6 +206,19 @@ import os
 import sys
 
 # --------------------------------------------------------------------------- #
+# Public feature flags                                                        #
+# --------------------------------------------------------------------------- #
+#
+# Read by the frontend through GET /api/config/ before anyone signs in, so they
+# must never contain anything sensitive.
+
+# Self-service registration. OFF by default: this is intended to run as an
+# invitation-only pilot where accounts are created deliberately (admin panel or
+# `manage.py createsuperuser`) rather than by anyone who finds the site. Turn it
+# on to let visitors create their own account.
+REGISTRATION_ENABLED = env_bool("REGISTRATION_ENABLED", False)
+
+# --------------------------------------------------------------------------- #
 # Job source providers                                                        #
 # --------------------------------------------------------------------------- #
 #
@@ -220,8 +233,16 @@ import sys
 # access to the platform. Enabling a provider without a recorded authorization
 # leaves it DISABLED_AUTHORIZATION_PENDING and the adapter is never called.
 #
+# PROVIDER_TEST_MODE relaxes condition 2 so an operator can evaluate the
+# adapters before any agreement exists. It is a deliberate, clearly-named
+# override rather than a way to pretend an authorization exists: providers it
+# enables report ENABLED_FOR_TESTING, never READY, so nothing in the UI or the
+# audit trail can mistake them for permitted. Default OFF.
+#
 # The default for every platform is OFF.
 # See docs/provider-authorization-matrix.md.
+
+PROVIDER_TEST_MODE = env_bool("PROVIDER_TEST_MODE", False)
 
 PROVIDER_LINKEDIN_ENABLED = env_bool("PROVIDER_LINKEDIN_ENABLED", False)
 PROVIDER_LINKEDIN_AUTHORIZATION_REFERENCE = os.getenv(
@@ -257,6 +278,17 @@ SAMPLE_DATA_ENABLED = env_bool("SAMPLE_DATA_ENABLED", True)
 # Run searches in a background thread. Disable for tests or single-process
 # deployments where inline execution is preferable.
 SEARCH_RUN_ASYNC = env_bool("SEARCH_RUN_ASYNC", True)
+
+# Whether something outside the web process actually runs
+# `manage.py run_scheduled_searches` on a timer (cron, systemd timer, ...).
+#
+# The application itself cannot schedule work: it only records when the next
+# run *should* be. Without an external trigger, enabling automatic search has
+# no effect beyond showing a time that will never arrive, so the UI is told the
+# truth through this flag rather than implying a schedule that does not exist.
+#
+# Default False: a fresh install has no cron entry.
+AUTO_SEARCH_SCHEDULER_ENABLED = env_bool("AUTO_SEARCH_SCHEDULER_ENABLED", False)
 
 # Maximum size for an uploaded CV (bytes).
 CV_MAX_UPLOAD_BYTES = int(os.getenv("CV_MAX_UPLOAD_BYTES", str(10 * 1024 * 1024)))

@@ -29,3 +29,15 @@ class CountsSerializer(serializers.Serializer):
 
 class LogoutSerializer(serializers.Serializer):
     refresh = serializers.CharField(required=False, help_text="Refresh token to invalidate.")
+
+
+class PublicConfigSerializer(serializers.Serializer):
+    """Feature flags the frontend reads before anyone signs in.
+
+    Unauthenticated, so it must never carry anything sensitive.
+    """
+
+    registrationEnabled = serializers.BooleanField(  # noqa: N815 - API camelCase
+        help_text="Whether visitors may create their own account. When false the "
+        "signup form is hidden and POST /api/auth/register/ is refused."
+    )

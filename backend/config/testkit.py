@@ -21,6 +21,10 @@ from django.test import override_settings
 #: Every platform provider pinned off, with no authorization reference recorded.
 #: This mirrors the shipped defaults so tests exercise the fail-closed path.
 DISABLED_PLATFORM_PROVIDERS: dict[str, object] = {
+    # Test mode is itself a switch that can open the gate, so it is pinned off
+    # here too. Without this, a developer's `.env` with PROVIDER_TEST_MODE=true
+    # would silently turn every "fails closed" assertion into a no-op.
+    "PROVIDER_TEST_MODE": False,
     "PROVIDER_LINKEDIN_ENABLED": False,
     "PROVIDER_LINKEDIN_AUTHORIZATION_REFERENCE": "",
     "PROVIDER_STEPSTONE_ENABLED": False,
@@ -33,6 +37,11 @@ DISABLED_PLATFORM_PROVIDERS: dict[str, object] = {
     # No live provider is operational under this configuration, so the synthetic
     # fallback is deterministic.
     "SAMPLE_DATA_ENABLED": True,
+    # Registration is closed by default; tests that exercise signup opt in.
+    "REGISTRATION_ENABLED": False,
+    # No scheduler in a test environment. Pinned so a developer whose local
+    # .env enables one still gets the shipped default behaviour.
+    "AUTO_SEARCH_SCHEDULER_ENABLED": False,
 }
 
 
