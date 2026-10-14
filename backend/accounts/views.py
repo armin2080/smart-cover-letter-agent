@@ -16,6 +16,11 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenRefreshView
 
 from config.serializers import EmptySerializer, LogoutSerializer, PublicConfigSerializer
+from config.throttling import (
+    AuthBurstThrottle,
+    AuthSustainedThrottle,
+    LoginIdentityThrottle,
+)
 
 from .cv_parser import parse_cv
 from .models import (
@@ -87,6 +92,7 @@ class RegisterView(APIView):
     permission_classes = [AllowAny]
     authentication_classes: list = []
     serializer_class = RegisterSerializer
+    throttle_classes = [AuthBurstThrottle, AuthSustainedThrottle]
 
     def post(self, request):
         if not settings.REGISTRATION_ENABLED:
@@ -111,11 +117,18 @@ class RegisterView(APIView):
 
 
 class LoginView(APIView):
-    """POST /api/auth/login/ — email + password authentication."""
+    """POST /api/auth/login/ — email + password authentication.
+
+    Rate limited on two independent axes. A single password check costs about
+    1.5s of CPU on the production host, so an unthrottled login route is a
+    denial-of-service vector against everything sharing that core, quite apart
+    from being a brute-force target.
+    """
 
     permission_classes = [AllowAny]
     authentication_classes: list = []
     serializer_class = LoginSerializer
+    throttle_classes = [AuthBurstThrottle, AuthSustainedThrottle, LoginIdentityThrottle]
 
     def post(self, request):
         serializer = LoginSerializer(data=request.data, context={"request": request})
@@ -149,6 +162,9 @@ class RefreshView(TokenRefreshView):
 
     permission_classes = [AllowAny]
     authentication_classes: list = []
+    # Token verification is HMAC, far cheaper than a password check, but this
+    # is still an unauthenticated endpoint worth bounding.
+    throttle_classes = [AuthSustainedThrottle]
 
 
 class MeView(APIView):

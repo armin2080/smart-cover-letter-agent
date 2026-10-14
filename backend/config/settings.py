@@ -18,6 +18,11 @@ load_dotenv(BASE_DIR / ".env")
 # touch the network, so they default to the deterministic demo provider.
 TESTING = "test" in sys.argv or os.getenv("DJANGO_TESTING") == "true"
 
+# Throttle counters live in a cache, which `TestCase` rollback does not reset.
+# Without per-test isolation the suite's own auth requests exhaust the login
+# limits and unrelated tests start seeing 429s. See config/testrunner.py.
+TEST_RUNNER = "config.testrunner.IsolatedThrottleTestRunner"
+
 
 def env_bool(name: str, default: bool = False) -> bool:
     raw = os.getenv(name)
@@ -203,6 +208,34 @@ REST_FRAMEWORK = {
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     "EXCEPTION_HANDLER": "config.exceptions.api_exception_handler",
     "DATETIME_FORMAT": "%Y-%m-%dT%H:%M:%S.%fZ",
+    # Applied to the credential endpoints in accounts/views.py. See
+    # config/throttling.py for why these are worth limiting so tightly.
+    "DEFAULT_THROTTLE_RATES": {
+        "auth-burst": os.getenv("THROTTLE_AUTH_BURST", "5/min"),
+        "auth-sustained": os.getenv("THROTTLE_AUTH_SUSTAINED", "30/hour"),
+        "auth-identity": os.getenv("THROTTLE_AUTH_IDENTITY", "10/hour"),
+    },
+}
+
+# --------------------------------------------------------------------------- #
+# Cache                                                                       #
+# --------------------------------------------------------------------------- #
+#
+# Django's default is LocMemCache, which is per-process. That is adequate here
+# because the service runs a single gunicorn worker, and it is the honest
+# choice: a shared backend (Redis, Memcached) would be needed the moment there
+# is more than one worker, and pretending otherwise would silently weaken the
+# limits above. The dedicated entry keeps throttle state from being evicted by
+# unrelated caching.
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "scla-default",
+    },
+    "throttle": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "scla-throttle",
+    },
 }
 
 SIMPLE_JWT = {

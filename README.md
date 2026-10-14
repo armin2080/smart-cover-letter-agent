@@ -166,6 +166,44 @@ Django admin at `/admin/`.
 If you later add an email backend, implement reset by issuing a
 `PasswordResetTokenGenerator` link and remove the note in `AuthPage.tsx`.
 
+## Rate limiting
+
+The credential endpoints are rate limited. This is not boilerplate: password
+verification in Django is deliberately slow, and measured on the production
+droplet (1 vCPU) a **single login attempt costs ~1.5 seconds of CPU**. An
+unthrottled login route therefore lets anyone occupy the core — not by
+exploiting anything, just by paying the cost of the app's own password hashing.
+That machine also runs a more important service on the same core.
+
+Three limits apply to `POST /api/auth/login/`, on independent axes:
+
+| Scope | Default | Keyed on | Purpose |
+| --- | --- | --- | --- |
+| `auth-burst` | `5/min` | client IP | Stops a script hammering the route |
+| `auth-sustained` | `30/hour` | client IP | Stops a slow drip under the burst limit |
+| `auth-identity` | `10/hour` | submitted email | Caps attempts on one account regardless of source IP |
+
+`/api/auth/register/` and `/api/auth/refresh/` are limited too.
+
+All three are configurable:
+
+```bash
+THROTTLE_AUTH_BURST=5/min
+THROTTLE_AUTH_SUSTAINED=30/hour
+THROTTLE_AUTH_IDENTITY=10/hour
+```
+
+**Single-worker caveat.** Counters live in `LocMemCache`, which is
+per-process. That is correct for the current deployment (one gunicorn worker)
+and is the honest choice — the moment there is more than one worker, these
+limits weaken to *per-worker* and a shared backend (Redis, Memcached) becomes
+necessary. The setting is commented in `config/settings.py` so this does not
+silently drift.
+
+Tests clear throttle counters before each case (`config/testrunner.py`), since
+caches are not transactional and the suite's own auth requests would otherwise
+exhaust the limits mid-run.
+
 ## Guided tour
 
 A new account is shown a short spotlight tour of the workspace the first time it

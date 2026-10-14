@@ -58,6 +58,18 @@ export class ApiError extends Error {
     return this.status === 400 || this.status === 422
   }
 
+  /**
+   * True when the server refused the request for hitting a rate limit.
+   *
+   * Worth its own branch: the credential endpoints are limited deliberately,
+   * so a user who mistypes their password a few times will meet this, and the
+   * raw backend detail ("Expected available in 60 seconds") is not something to
+   * put in front of them.
+   */
+  get isRateLimited(): boolean {
+    return this.status === 429
+  }
+
   get isServerError(): boolean {
     return this.status >= 500
   }
@@ -75,6 +87,9 @@ export class ApiError extends Error {
     if (this.isUnauthorized) return "Your session has expired. Please sign in again."
     if (this.isForbidden) return "You do not have permission to perform this action."
     if (this.isNotFound) return "We could not find what you were looking for."
+    if (this.isRateLimited) {
+      return "Too many attempts just now. Please wait a minute and try again."
+    }
     if (this.isValidation) {
       const first = this.firstFieldMessage
       if (first) return first

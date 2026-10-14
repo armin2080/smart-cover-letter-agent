@@ -6,6 +6,8 @@ from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
 
+from unittest.mock import patch
+
 from .models import Profile, ProfileSection, User
 
 VALID_PASSWORD = "test-pass-123"
@@ -20,6 +22,194 @@ def registration_open():
     """
 
     return override_settings(REGISTRATION_ENABLED=True)
+
+
+class AuthRateLimitTests(APITestCase):
+    """The credential endpoints must be rate limited.
+
+    A single password check costs ~1.5s of CPU on the production host, so an
+    unthrottled login route lets anyone occupy the core that a more important
+    service also runs on. These tests assert the limits exist and apply on the
+    axes that matter.
+
+    Rates are patched on the classes directly rather than through
+    `override_settings`: DRF binds `THROTTLE_RATES` at class-definition time, so
+    a settings override would silently have no effect and the test would pass
+    without proving anything.
+    """
+
+    def setUp(self):
+        from django.core.cache import caches
+
+        caches["throttle"].clear()
+        User.objects.create_user(
+            email="target@example.com", password=VALID_PASSWORD, full_name="Target"
+        )
+        self._originals = []
+
+    def tearDown(self):
+        """Restore every patched attribute and clear the counters.
+
+        All three attributes are restored, not just `rate`: leaving a modified
+        `num_requests` or `duration` behind would leak into whichever test class
+        runs next and produce confusing failures far from the cause.
+        """
+
+        from django.core.cache import caches
+
+        for cls, attrs in self._originals:
+            for name, value in attrs.items():
+                setattr(cls, name, value)
+        caches["throttle"].clear()
+
+    def _set_rate(self, cls, rate: str):
+        """Pin one throttle's rate, recording the originals for restoration.
+
+        `parse_rate` is an instance method in DRF, so an instance is used to
+        convert the rate string — keeping the parsing in DRF's hands rather
+        than duplicating its format here.
+        """
+
+        self._originals.append(
+            (
+                cls,
+                {
+                    "rate": getattr(cls, "rate", None),
+                    "num_requests": getattr(cls, "num_requests", None),
+                    "duration": getattr(cls, "duration", None),
+                },
+            )
+        )
+        cls.rate = rate
+        cls.num_requests, cls.duration = cls().parse_rate(rate)
+
+    def _login(self, email: str = "target@example.com", password: str = "wrong"):
+        return self.client.post(
+            reverse("auth-login"), {"email": email, "password": password}, format="json"
+        )
+
+    def test_login_is_rate_limited(self):
+        from config.throttling import AuthBurstThrottle
+
+        self._set_rate(AuthBurstThrottle, "3/min")
+
+        codes = [self._login().status_code for _ in range(5)]
+        self.assertEqual(codes[:3], [status.HTTP_400_BAD_REQUEST] * 3)
+        self.assertEqual(codes[3:], [status.HTTP_429_TOO_MANY_REQUESTS] * 2)
+
+    def test_a_blocked_attempt_is_rejected_before_the_password_check(self):
+        """The limit must save CPU, not merely report a limit.
+
+        DRF checks throttles in `initial()`, before the handler runs. If that
+        ever regressed, the endpoint would still answer 429 while doing the
+        expensive work first — which is the whole thing we are preventing.
+        """
+
+        from config.throttling import AuthBurstThrottle
+
+        self._set_rate(AuthBurstThrottle, "2/min")
+
+        self._login()
+        self._login()
+
+        with patch(
+            "django.contrib.auth.hashers.check_password",
+            side_effect=AssertionError("password hashing ran despite the throttle"),
+        ):
+            response = self._login()
+
+        self.assertEqual(response.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
+
+    def test_limits_apply_per_targeted_account(self):
+        """A distributed attempt on one account must still be capped.
+
+        The IP throttles are disabled here so this measures the identity
+        throttle alone — otherwise a passing test could just be the IP limit
+        firing, which would prove nothing about per-account isolation.
+        """
+
+        from config.throttling import (
+            AuthBurstThrottle,
+            AuthSustainedThrottle,
+            LoginIdentityThrottle,
+        )
+
+        self._set_rate(AuthBurstThrottle, "1000/min")
+        self._set_rate(AuthSustainedThrottle, "1000/hour")
+        self._set_rate(LoginIdentityThrottle, "2/hour")
+
+        codes = [self._login().status_code for _ in range(4)]
+        self.assertEqual(codes[:2], [status.HTTP_400_BAD_REQUEST] * 2)
+        self.assertEqual(codes[2:], [status.HTTP_429_TOO_MANY_REQUESTS] * 2)
+
+    def test_one_account_being_attacked_does_not_block_another(self):
+        """Per-account keying must not become a shared lock."""
+
+        from config.throttling import (
+            AuthBurstThrottle,
+            AuthSustainedThrottle,
+            LoginIdentityThrottle,
+        )
+
+        self._set_rate(AuthBurstThrottle, "1000/min")
+        self._set_rate(AuthSustainedThrottle, "1000/hour")
+        self._set_rate(LoginIdentityThrottle, "2/hour")
+
+        for _ in range(2):
+            self._login(email="target@example.com")
+        self.assertEqual(self._login(email="target@example.com").status_code, 429)
+
+        # A different account, same client, must still be served.
+        self.assertEqual(
+            self._login(email="someone.else@example.com").status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+    def test_the_identity_throttle_does_not_store_the_raw_email(self):
+        """A cache dump must not read as a list of targeted accounts."""
+
+        from config.throttling import LoginIdentityThrottle
+
+        class _Request:
+            data = {"email": "Target@Example.com"}
+
+        key = LoginIdentityThrottle().get_cache_key(_Request(), None)
+        self.assertIsNotNone(key)
+        self.assertNotIn("target", key.lower())
+        self.assertNotIn("@", key)
+
+    def test_the_same_account_hashes_to_the_same_key(self):
+        from config.throttling import LoginIdentityThrottle
+
+        def key_for(email):
+            class _Request:
+                data = {"email": email}
+
+            return LoginIdentityThrottle().get_cache_key(_Request(), None)
+
+        self.assertEqual(key_for("a@b.com"), key_for("A@B.com"))
+        self.assertNotEqual(key_for("a@b.com"), key_for("c@d.com"))
+
+    def test_refresh_is_rate_limited(self):
+        from config.throttling import AuthSustainedThrottle
+
+        self._set_rate(AuthSustainedThrottle, "2/hour")
+
+        codes = [
+            self.client.post(reverse("auth-refresh"), {"refresh": "not-a-token"}, format="json").status_code
+            for _ in range(4)
+        ]
+        self.assertIn(status.HTTP_429_TOO_MANY_REQUESTS, codes)
+
+    def test_the_shipped_limits_are_configured(self):
+        """Guards against the rates being dropped from settings."""
+
+        from django.conf import settings
+
+        rates = settings.REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]
+        for scope in ("auth-burst", "auth-sustained", "auth-identity"):
+            self.assertIn(scope, rates)
+            self.assertTrue(rates[scope])
 
 
 @registration_open()

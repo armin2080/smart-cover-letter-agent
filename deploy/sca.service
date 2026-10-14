@@ -1,0 +1,60 @@
+[Unit]
+Description=Smart Cover Letter Agent (sca.armin2080.de)
+Documentation=https://github.com/armin2080/smart-cover-letter-agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=codex
+Group=codex
+WorkingDirectory=/home/codex/sca/app/backend
+
+# One worker. The droplet has a single vCPU and 458 MB of RAM shared with
+# Radmin, so more workers would only add memory pressure without throughput.
+ExecStart=/home/codex/sca/venv/bin/gunicorn \
+    --workers 1 \
+    --bind 127.0.0.1:8082 \
+    --timeout 120 \
+    --access-logfile - \
+    --error-logfile - \
+    config.wsgi:application
+
+# ---------------------------------------------------------------------------
+# Failure containment
+# ---------------------------------------------------------------------------
+# This box has 512 MB and a history of OOM kills. Radmin runs unprotected with
+# oom_score_adj=0, and the kernel picks its victim by memory size — so an
+# unprotected app of comparable size would compete with it. Raising our own
+# score makes this service the preferred victim, which keeps Radmin safe.
+OOMScoreAdjust=500
+
+# A hard ceiling, so a runaway request is killed inside this cgroup rather
+# than destabilising the whole machine.
+MemoryHigh=192M
+MemoryMax=256M
+
+Restart=always
+RestartSec=5
+
+# ---------------------------------------------------------------------------
+# Hardening
+# ---------------------------------------------------------------------------
+# The service runs as an unprivileged user and cannot see /root, so it has no
+# way to reach Radmin even by accident.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+
+# Logging goes to the journal; `journalctl -u sca` is the whole story.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=sca
+
+[Install]
+WantedBy=multi-user.target
