@@ -60,8 +60,46 @@ entirely rather than relying on that.
 cd /home/codex/sca/app/backend
 /home/codex/sca/venv/bin/python manage.py migrate
 /home/codex/sca/venv/bin/python manage.py collectstatic --noinput
+```
+
+## ⚠️ Restart the service — rsync alone does nothing
+
+```bash
 sudo systemctl restart sca
 ```
+
+Python code is loaded into memory at process start. Copying new files changes
+nothing until the process restarts, and the symptom is subtle: the site keeps
+serving the **old** code with no error anywhere. This was hit for real — a fix
+for the blank-page bug was deployed and appeared not to work, because gunicorn
+was still running the previous `urls.py`.
+
+`Restart=always` does **not** help here: it only restarts a process that has
+exited, and the running process never exits.
+
+To verify which code is actually live, check something that changed:
+
+```bash
+curl -s -o /dev/null -w "%{content_type}\n" \
+  -H "Host: sca.armin2080.de" http://127.0.0.1:8082/assets/<hash>.js
+# must be text/javascript, NOT text/html
+```
+
+## Verify asset serving, not just status codes
+
+A blank page was once shipped because `/assets/<hash>.js` returned **200** — with
+`Content-Type: text/html` and the 594-byte SPA shell as the body. Every check
+looked fine because only the status code was examined.
+
+```bash
+JS=$(curl -s -H "Host: sca.armin2080.de" http://127.0.0.1:8082/ \
+     | grep -oE "/assets/[a-zA-Z0-9_.-]+\.js" | head -1)
+curl -s -o /dev/null -w "type=%{content_type} size=%{size_download}\n" \
+     -H "Host: sca.armin2080.de" "http://127.0.0.1:8082$JS"
+```
+
+Expect `text/javascript` and a size in the hundreds of KB. Anything else means
+the SPA fallback is swallowing build output.
 
 ## Service
 
