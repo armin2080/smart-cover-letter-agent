@@ -415,6 +415,9 @@ def _persist(user, groups, insights) -> int:
                 employment_type_candidates=[
                     category.value for category in job.employment_type_candidates
                 ],
+                language=job.language,
+                language_requirement=job.language_requirement,
+                language_evidence=job.language_evidence,
                 work_model=job.work_model.value,
                 salary_min=job.salary_min,
                 salary_max=job.salary_max,
