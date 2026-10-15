@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { useToast } from "../../app/ToastProvider"
 import { EmptyState, ErrorState, Skeleton } from "../../components/feedback/States"
+import { LanguageTag } from "../../components/jobs/LanguageTag"
 import { Button } from "../../components/ui/Button"
 import { Badge, Company } from "../../components/ui/Common"
 import { Icon } from "../../components/ui/Icon"
@@ -264,6 +265,11 @@ export function MyJobsPage() {
                   <div className="job-meta">
                     <span>{job.location}</span>
                     <span>{employmentLabel(job.employmentType)}</span>
+                    {/* Language sits with the other facts about the advert.
+                        A stated requirement is shown instead of the posting's
+                        language, because that is the part that affects whether
+                        you can apply. */}
+                    <LanguageTag job={job} />
                   </div>
                   <div className="skill-row">
                     {job.skills.slice(0, 3).map((skill) => (

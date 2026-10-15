@@ -1,5 +1,47 @@
 /** Application-shell additions layered on top of the base stylesheet. */
 
+/* Language tag ------------------------------------------------------------
+   Two states, deliberately unequal. A stated requirement decides whether
+   someone can apply, so it is emphasised; a note about which language the
+   advert is written in is information only and stays quiet. */
+
+.language-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 6px;
+  padding: 2px 7px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.language-tag.info {
+  background: #eef2f5;
+  color: var(--muted);
+}
+
+.language-tag.requirement {
+  background: #fdf3e3;
+  color: #8a5a12;
+  font-weight: 600;
+}
+
+.language-tag .icon {
+  flex: none;
+}
+
+.language-evidence {
+  font-weight: 400;
+  opacity: 0.85;
+}
+
+/* In the detail panel the tag sits with the other badges, so it takes the
+   badge spacing rather than the inline meta spacing. */
+.detail-badges .language-tag {
+  padding: 4px 9px;
+  font-size: 12px;
+}
+
 /* Shown in place of a password-reset link, which does not exist. Reads as
    guidance rather than as a disabled control. */
 .form-meta-note {

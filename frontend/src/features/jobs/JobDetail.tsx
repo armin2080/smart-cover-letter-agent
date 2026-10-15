@@ -1,4 +1,5 @@
 import { ErrorState, Skeleton } from "../../components/feedback/States"
+import { LanguageTag } from "../../components/jobs/LanguageTag"
 import { Button } from "../../components/ui/Button"
 import { Badge, Company } from "../../components/ui/Common"
 import { Icon } from "../../components/ui/Icon"
@@ -111,6 +112,9 @@ export function JobDetail({
 
       <div className="detail-badges">
         <Badge match={job.match} />
+        {/* Shown here with the matched phrase, so the claim can be checked
+            against the advert rather than taken on trust. */}
+        <LanguageTag job={job} showEvidence />
         {job.hasCoverLetter && <span className="badge badge-cover">Cover letter</span>}
       </div>
 

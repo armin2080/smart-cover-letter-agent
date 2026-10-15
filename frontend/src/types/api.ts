@@ -89,6 +89,18 @@ export interface Job {
    * listing, e.g. "Intern / Working Student" carries both.
    */
   employmentTypeCandidates?: string[]
+  /**
+   * Language the posting is written in, and what it asks of the reader.
+   *
+   * The boards searched are mostly German, so this is worth knowing before
+   * opening an advert — particularly if you do not read German.
+   */
+  language?: string
+  languageLabel?: string
+  languageRequirement?: string
+  languageRequirementLabel?: string
+  /** The phrase that established the requirement, so the claim is checkable. */
+  languageEvidence?: string
   workModel?: string
   postedAt: string
   collectedAt?: string

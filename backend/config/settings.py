@@ -284,7 +284,12 @@ CSRF_TRUSTED_ORIGINS = env_list("CSRF_TRUSTED_ORIGINS", CORS_ALLOWED_ORIGINS)
 # deterministic, profile-grounded draft so the feature still works offline.
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 GROQ_API_URL = os.getenv("GROQ_API_URL", "https://api.groq.com/openai/v1/chat/completions")
-GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-70b-versatile")
+# Groq model id. `llama-3.1-70b-versatile` was decommissioned and now returns
+# HTTP 400 "model_decommissioned", so the default is a current model. Check
+# https://console.groq.com/docs/deprecations when this starts failing — Groq
+# retires models on a schedule, and the failure is a clear 400 rather than
+# anything silent.
+GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 GROQ_TIMEOUT_SECONDS = int(os.getenv("GROQ_TIMEOUT_SECONDS", "60"))
 
 import os
