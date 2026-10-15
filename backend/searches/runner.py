@@ -22,6 +22,7 @@ persistence logic are unchanged.
 from __future__ import annotations
 
 import logging
+import re
 import threading
 import time
 
@@ -131,6 +132,41 @@ def _fail(run_id: int, message: str) -> None:
 # --------------------------------------------------------------------------- #
 
 
+#: How many profile skills to add to the search terms.
+#:
+#: A profile can list a dozen skills; each becomes a search request. This caps
+#: the broadening pass so it cannot dominate the budget the adapters enforce.
+MAX_PROFILE_SKILL_TERMS = 4
+
+
+def _profile_skill_terms(user) -> list[str]:
+    """Skills named in the user's profile, as search terms.
+
+    Desired roles say what someone wants; their skills say what they can
+    actually do, and the two overlap only partly. Searching on roles alone
+    misses postings that match the skills but use a different job title — a
+    profile listing Python and Linux should surface backend roles even when
+    the user only asked for "AI".
+
+    The profile's skills section is free text, so it is split on the usual
+    separators and trimmed. Capped, because this feeds a search budget.
+    """
+
+    sections = {section.key: section.content for section in user.profile_sections.all()}
+    raw = sections.get("skills", "") or ""
+
+    terms: list[str] = []
+    for chunk in re.split(r"[,\n;•|/]+", raw):
+        cleaned = chunk.strip().strip(".-–—")
+        # Skip fragments that are prose rather than a skill ("and", "etc").
+        if not cleaned or len(cleaned) > 40 or len(cleaned.split()) > 3:
+            continue
+        terms.append(cleaned)
+        if len(terms) >= MAX_PROFILE_SKILL_TERMS:
+            break
+    return terms
+
+
 def _build_request(run: SearchRun) -> SearchRequest:
     """Translate stored criteria into a provider-independent request."""
 
@@ -156,8 +192,23 @@ def _build_request(run: SearchRun) -> SearchRequest:
         except ValueError:
             continue
 
+    # What the user asked for comes first; profile skills follow as a
+    # broadening pass. The adapters cap how many terms they actually use, so
+    # this ordering decides what survives that cap.
+    keywords: list[str] = []
+    seen: set[str] = set()
+    for term in [
+        *as_list("roles"),
+        *_profile_skill_terms(run.user),
+        *as_list("keywords"),
+    ]:
+        cleaned = (term or "").strip()
+        if cleaned and cleaned.lower() not in seen:
+            seen.add(cleaned.lower())
+            keywords.append(cleaned)
+
     return SearchRequest(
-        keywords=as_list("roles") or as_list("keywords"),
+        keywords=keywords,
         locations=as_list("locations"),
         radius_km=criteria.get("radius_km", 50) or 50,
         employment_types=employment_types,

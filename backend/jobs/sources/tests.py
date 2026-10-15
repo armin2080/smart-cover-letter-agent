@@ -636,6 +636,54 @@ class AuthorizationGateTests(TestCase):
 
 
 @platform_providers_disabled()
+class SearchTermTests(TestCase):
+    """How a user's terms become the queries sent to a platform.
+
+    Getting this wrong is invisible: a query for the wrong string simply
+    returns nothing, which looks identical to a platform having no matching
+    jobs.
+    """
+    def _terms(self, keywords: list[str]) -> list[str]:
+        from jobs.sources.base import _search_terms
+
+        return _search_terms(SearchRequest(keywords=keywords, locations=["Dortmund"]))
+
+    def test_the_users_own_wording_comes_first(self):
+        self.assertEqual(self._terms(["AI"])[0], "AI")
+
+    def test_a_german_spelling_is_added_for_an_english_term(self):
+        """German postings do not use the English phrase."""
+
+        self.assertIn("webentwicklung", self._terms(["Web Development"]))
+        self.assertIn("datenanalyse", self._terms(["Data Science"]))
+
+    def test_every_keyword_is_used_not_just_the_first(self):
+        """Regression: only keywords[0] was ever queried."""
+
+        terms = self._terms(["Data Science", "Web Development"])
+        self.assertTrue(any("datenanalyse" in t or "data science" in t.lower() for t in terms))
+        self.assertTrue(any("web" in t.lower() for t in terms))
+
+    def test_duplicates_are_removed(self):
+        terms = self._terms(["AI", "ai", "AI"])
+        self.assertEqual(len(terms), len({t.lower() for t in terms}))
+
+    def test_the_total_is_capped(self):
+        """Each term is a request to a real platform."""
+
+        from jobs.sources.base import MAX_SEARCH_TERMS
+
+        terms = self._terms(["AI", "Data Science", "Web Development", "Networking", "Cloud"])
+        self.assertLessEqual(len(terms), MAX_SEARCH_TERMS)
+
+    def test_no_keywords_falls_back_to_a_broad_term(self):
+        self.assertEqual(self._terms([]), ["Werkstudent"])
+
+    def test_blank_keywords_are_ignored(self):
+        self.assertEqual(self._terms(["", "   "]), ["Werkstudent"])
+
+
+@platform_providers_disabled()
 class ProviderTestModeTests(TestCase):
     """`PROVIDER_TEST_MODE` lets an operator evaluate the adapters.
 

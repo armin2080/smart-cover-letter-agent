@@ -166,6 +166,39 @@ Django admin at `/admin/`.
 If you later add an email backend, implement reset by issuing a
 `PasswordResetTokenGenerator` link and remove the note in `AuthPage.tsx`.
 
+## What a search actually looks for
+
+Three things decide which listings a search can reach, and getting any of them
+wrong is invisible — a query for the wrong string simply returns nothing, which
+looks the same as a platform having no matching jobs.
+
+**Desired roles, then profile skills.** What you asked for comes first, but the
+skills in your profile are searched too. Roles say what you want; skills say
+what you can do, and the two overlap only partly. A profile listing Python and
+Linux should surface backend roles even when you only typed "AI".
+
+**Every term, not just the first.** A list of themes like `["AI", "Data", "Web"]`
+used to query only `"AI"`, which matches almost nothing.
+
+**Both languages.** The listings are overwhelmingly German while the terms typed
+are usually English, so the two never meet on their own:
+
+| You type | Also searched | And these titles match |
+| --- | --- | --- |
+| `Web Development` | `webentwicklung` | Webentwickler, Frontendentwickler |
+| `Data Science` | `datenanalyse` | Datenanalyst, Werkstudent Datenanalyse |
+| `AI Engineer` | `ki`, `künstliche intelligenz` | KI-Ingenieur, KI-Entwickler |
+| `Mechanical Engineering` | `maschinenbau` | Maschinenbauingenieur |
+
+German compounds are handled too — `Maschinenbauingenieur` is `Maschinenbau` +
+`Ingenieur`, which exact word matching cannot see.
+
+The vocabulary lives in `jobs/sources/roles.py`. It is a curated list, not a
+translation service: it covers the roles this product targets and grows by
+adding an entry. `jobs/sources/test_roles.py` guards its coherence, including
+that unrelated roles do *not* match — a matcher that says yes to everything
+would look successful while being useless.
+
 ## Rate limiting
 
 The credential endpoints are rate limited. This is not boilerplate: password

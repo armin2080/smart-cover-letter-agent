@@ -101,16 +101,28 @@ def _display_labels(job_skills: Iterable[str], matched_terms: set[str]) -> list[
 
 
 def _titles_overlap(candidate: str, targets: Iterable[str]) -> str | None:
-    """Return the first target title that meaningfully overlaps with `candidate`."""
+    """Return the first target title that means the same as `candidate`.
 
-    candidate_tokens = set(tokenize(candidate))
-    if not candidate_tokens:
+    Delegates the comparison to `roles.titles_are_equivalent`, which handles
+    the three cases that matter here:
+
+    * the same role written in different languages — a German posting for
+      "Webentwickler" is the role someone asked for as "Web Development";
+    * a broad target inside a specific title — "AI" matches "AI Automation
+      Engineer";
+    * plural and agent-noun forms — "Data Scientist" against "Data Science".
+
+    Comparing raw tokens, as this used to, silently discarded German postings
+    for exactly the roles the user wanted, because no token was shared.
+    """
+
+    from jobs.sources.roles import titles_are_equivalent
+
+    if not (candidate or "").strip():
         return None
+
     for target in targets:
-        target_tokens = set(tokenize(target))
-        if not target_tokens:
-            continue
-        if target_tokens <= candidate_tokens or candidate_tokens <= target_tokens:
+        if titles_are_equivalent(candidate, target):
             return target
     return None
 

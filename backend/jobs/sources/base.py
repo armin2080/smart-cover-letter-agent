@@ -253,30 +253,44 @@ class SearchRequest:
         return " · ".join(parts) or "Profile preferences"
 
 
-#: How many distinct search terms one source will be queried with.
+#: How many distinct search terms one source will be queried with, after
+#: expansion.
 #:
-#: Each term costs a request, so this is a budget rather than a preference. A
-#: user's desired roles are often a list of themes — "AI", "Data", "Web" —
-#: and querying only the first returns nothing useful.
-MAX_SEARCH_TERMS = 3
+#: Each term costs a request to a real platform, so this is a budget rather
+#: than a preference. Too low and a user's list of themes ("AI", "Data", "Web")
+#: only ever searches the first; too high and one search hammers the platform.
+MAX_SEARCH_TERMS = 6
 
 
 def _search_terms(request: SearchRequest) -> list[str]:
     """The distinct terms to query a source with, in order.
 
-    Falls back to a broad term when the user has expressed no preference, so a
-    search still returns something rather than querying an empty string.
+    Each of the user's terms is expanded with its other-language spellings, so
+    a search for "Web Development" also reaches "Webentwicklung". German
+    postings do not use the English phrase, and without this the search
+    silently misses exactly the listings it was meant to find.
+
+    The user's own wording always comes first — an expansion is a fallback, not
+    a replacement. Falls back to a broad term when no preference was given, so
+    a search returns something rather than querying an empty string.
     """
 
-    seen: list[str] = []
-    for term in request.keywords or []:
-        cleaned = (term or "").strip()
-        if cleaned and cleaned.lower() not in {t.lower() for t in seen}:
-            seen.append(cleaned)
-        if len(seen) >= MAX_SEARCH_TERMS:
-            break
+    from jobs.sources.roles import expand_for_search
 
-    return seen or ["Werkstudent"]
+    terms: list[str] = []
+    seen: set[str] = set()
+
+    for raw in request.keywords or []:
+        for term in expand_for_search(raw, limit=2):
+            key = term.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            terms.append(term)
+            if len(terms) >= MAX_SEARCH_TERMS:
+                return terms
+
+    return terms or ["Werkstudent"]
 
 
 # --------------------------------------------------------------------------- #

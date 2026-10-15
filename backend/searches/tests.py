@@ -279,6 +279,97 @@ class AutoSearchSettingsApiTests(APITestCase):
         self.assertFalse(response.data["schedulerActive"])
 
 
+@platform_providers_disabled()
+class ProfileSkillSearchTests(APITestCase):
+    """A search should use the profile's skills, not only the desired roles.
+
+    Roles say what someone wants; skills say what they can do. Searching on
+    roles alone misses postings that fit the skills under a different title —
+    a profile listing Python and Linux should reach backend roles even when
+    the user only typed "AI".
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="skills@example.com", password=PASSWORD, full_name="Skills User"
+        )
+        self.user.profile_sections.update_or_create(
+            key="skills", defaults={"title": "Skills", "content": "Python, Linux, Netzwerk, Docker"}
+        )
+        self.user.preferences.desired_roles = ["AI"]
+        self.user.preferences.save()
+
+    def _criteria(self) -> dict:
+        from .runner import criteria_from_preferences
+
+        return criteria_from_preferences(self.user, sources=["linkedin"])
+
+    def _request(self):
+        from .runner import _build_request
+
+        run = SearchRun.objects.create(
+            user=self.user, criteria=self._criteria(), sources=["linkedin"]
+        )
+        return _build_request(run)
+
+    def test_roles_come_before_skills(self):
+        """What the user asked for outranks what the profile suggests."""
+
+        keywords = self._request().keywords
+        self.assertEqual(keywords[0], "AI")
+        self.assertLess(keywords.index("AI"), keywords.index("Python"))
+
+    def test_profile_skills_are_included(self):
+        keywords = self._request().keywords
+        for skill in ("Python", "Linux", "Netzwerk", "Docker"):
+            self.assertIn(skill, keywords)
+
+    def test_the_skill_list_is_capped(self):
+        """Each skill becomes a search request, so the list cannot be unbounded."""
+
+        from .runner import MAX_PROFILE_SKILL_TERMS, _profile_skill_terms
+
+        self.user.profile_sections.update_or_create(
+            key="skills",
+            defaults={"title": "Skills", "content": "a, b, c, d, e, f, g, h, i, j"},
+        )
+        self.assertLessEqual(len(_profile_skill_terms(self.user)), MAX_PROFILE_SKILL_TERMS)
+
+    def test_prose_in_the_skills_field_is_skipped(self):
+        """The section is free text, so it can contain sentences."""
+
+        from .runner import _profile_skill_terms
+
+        self.user.profile_sections.update_or_create(
+            key="skills",
+            defaults={
+                "title": "Skills",
+                "content": "Python, Experienced in building distributed systems across teams, Linux",
+            },
+        )
+        terms = _profile_skill_terms(self.user)
+        self.assertIn("Python", terms)
+        self.assertIn("Linux", terms)
+        self.assertNotIn(
+            "Experienced in building distributed systems across teams", terms
+        )
+
+    def test_a_profile_without_skills_still_produces_a_request(self):
+        from .runner import _profile_skill_terms
+
+        self.user.profile_sections.update_or_create(
+            key="skills", defaults={"title": "Skills", "content": ""}
+        )
+        self.assertEqual(_profile_skill_terms(self.user), [])
+        self.assertEqual(self._request().keywords, ["AI"])
+
+    def test_saved_keywords_are_still_included(self):
+        self.user.preferences.keywords = ["SaaS"]
+        self.user.preferences.save()
+        self.assertIn("SaaS", self._request().keywords)
+
+
+@platform_providers_disabled()
 class RunnerRobustnessTests(APITestCase):
     def setUp(self):
         self.user = User.objects.create_user(email="runner@example.com", password=PASSWORD)
