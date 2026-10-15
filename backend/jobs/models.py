@@ -72,6 +72,16 @@ class Job(models.Model):
     employment_type_evidence = models.JSONField(default=list, blank=True)
     #: Categories that had evidence when the type could not be decided.
     employment_type_candidates = models.JSONField(default=list, blank=True)
+
+    # -- language ----------------------------------------------------------
+    #
+    # The boards this searches are mostly German, so "what language is this
+    # advert in, and what does it ask of me" is information a reader wants
+    # before opening it — particularly if they do not speak German.
+    language = models.CharField(max_length=16, default="unknown")
+    language_requirement = models.CharField(max_length=24, default="none-stated")
+    #: The phrase that established the requirement, so the claim is checkable.
+    language_evidence = models.CharField(max_length=200, blank=True)
     work_model = models.CharField(max_length=16, choices=WorkModel.choices, default=WorkModel.UNKNOWN)
 
     # -- compensation ------------------------------------------------------- #

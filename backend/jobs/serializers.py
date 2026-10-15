@@ -22,6 +22,14 @@ class JobSerializer(serializers.ModelSerializer):
     employmentTypeCandidates = serializers.ListField(
         source="employment_type_candidates", read_only=True
     )
+    #: The language the posting is written in, and what it asks of the reader.
+    #: Label variants are sent alongside so the UI does not have to duplicate
+    #: the enum, which would drift.
+    language = serializers.CharField(read_only=True)
+    languageLabel = serializers.SerializerMethodField()
+    languageRequirement = serializers.CharField(read_only=True)
+    languageRequirementLabel = serializers.SerializerMethodField()
+    languageEvidence = serializers.CharField(source="language_evidence", read_only=True)
     workModel = serializers.CharField(source="work_model", read_only=True)
     postedAt = serializers.DateTimeField(source="posted_at", read_only=True)
     collectedAt = serializers.DateTimeField(source="collected_at", read_only=True)
@@ -53,6 +61,11 @@ class JobSerializer(serializers.ModelSerializer):
             "employmentTypeConfidence",
             "employmentTypeEvidence",
             "employmentTypeCandidates",
+            "language",
+            "languageLabel",
+            "languageRequirement",
+            "languageRequirementLabel",
+            "languageEvidence",
             "workModel",
             "postedAt",
             "collectedAt",
@@ -75,6 +88,22 @@ class JobSerializer(serializers.ModelSerializer):
             return EmploymentType(obj.employment_type).label
         except ValueError:
             return obj.employment_type
+
+    def get_languageLabel(self, obj: Job) -> str:  # noqa: N802 - API camelCase
+        from jobs.sources.language import Language
+
+        try:
+            return Language(obj.language).label
+        except ValueError:
+            return "Unknown"
+
+    def get_languageRequirementLabel(self, obj: Job) -> str:  # noqa: N802 - API camelCase
+        from jobs.sources.language import LanguageRequirement
+
+        try:
+            return LanguageRequirement(obj.language_requirement).label
+        except ValueError:
+            return "Not stated"
 
 
 class JobDetailSerializer(JobSerializer):

@@ -13,6 +13,7 @@ from django.utils import timezone
 
 from jobs.sources.base import EmploymentType, NormalizedJob, RawJob, WorkModel
 from jobs.sources.classification import classify
+from jobs.sources.language import detect_language_profile
 
 # --------------------------------------------------------------------------- #
 # Location                                                                    #
@@ -323,6 +324,11 @@ def normalize_raw_job(raw: RawJob) -> NormalizedJob:
         employment_type_hint=raw.employment_type_raw,
     )
 
+    # Language is read from the title and description together: a German title
+    # with an English body is common, and the requirement is usually stated in
+    # the body regardless of which language the title uses.
+    language_profile = detect_language_profile(raw.title, raw.description)
+
     # If prose gave us nothing but the source supplied a structured type, trust
     # the structured hint instead of leaving the record UNKNOWN.
     if classification.employment_type is ET.UNKNOWN and raw.employment_type_raw:
@@ -347,6 +353,9 @@ def normalize_raw_job(raw: RawJob) -> NormalizedJob:
         employment_type_confidence=classification.confidence,
         employment_type_evidence=classification.matched_terms,
         employment_type_candidates=list(classification.candidates),
+        language=language_profile.language.value,
+        language_requirement=language_profile.requirement.value,
+        language_evidence=language_profile.evidence,
         work_model=work_model,
         posted_at=parse_posted_at(raw.posted_at_raw),
         collected_at=timezone.now(),

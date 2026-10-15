@@ -199,6 +199,13 @@ class NormalizedJob:
     #: Categories that had evidence. Empty when the listing stated no type.
     employment_type_candidates: list[EmploymentType] = field(default_factory=list)
 
+    #: The language the posting is written in, and what it asks of the reader.
+    #: Stored as values so the field survives serialisation unchanged.
+    language: str = "unknown"
+    language_requirement: str = "none-stated"
+    #: The phrase that established the requirement, for display.
+    language_evidence: str = ""
+
     work_model: WorkModel = WorkModel.UNKNOWN
 
     salary_min: int | None = None
