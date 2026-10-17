@@ -307,6 +307,60 @@ class MatchingEngineTests(APITestCase):
         location_line = next(line for line in insight.preference_fit if "Location" in line.title)
         self.assertFalse(location_line.positive)
 
+    def test_a_neighbouring_city_is_not_reported_as_a_wrong_location(self):
+        """A radius search returns nearby towns; they are not mismatches.
+
+        The boards are queried with the location and the user's radius, so a
+        Dortmund search returns Bochum and Hamm. Calling those "outside your
+        preferences" is false — the user already said they would travel that
+        far — and it dragged the preference ratio down far enough that no such
+        job could ever be rated good.
+        """
+
+        insight = self._insight(preferred_locations=["Dortmund"], radius_km=50)
+        location_line = next(
+            line for line in insight.preference_fit if "city" in line.title.lower()
+        )
+        self.assertTrue(location_line.neutral)
+        self.assertFalse(location_line.positive)
+
+    def test_an_exact_city_search_still_rejects_another_city(self):
+        """With radius 0 the user asked for that city specifically."""
+
+        insight = self._insight(preferred_locations=["Dortmund"], radius_km=0)
+        location_line = next(line for line in insight.preference_fit if "Location" in line.title)
+        self.assertFalse(location_line.neutral)
+        self.assertFalse(location_line.positive)
+
+    def test_a_neutral_line_does_not_change_the_preference_ratio(self):
+        """An unknown must not be scored as either a pass or a fail."""
+
+        matched = self._insight(preferred_locations=["Berlin"], radius_km=50)
+        unmatched = self._insight(
+            preferred_locations=["Berlin"], radius_km=50, location="Hamburg"
+        )
+        # Same roles, employment and source lines, so the verdict must agree;
+        # only an unverifiable location differs between them.
+        self.assertEqual(matched.match, unmatched.match)
+
+    def test_a_short_role_term_matches_its_german_compound(self):
+        """Regression: "Web" matched nothing on German boards.
+
+        `webentwicklung` maps to the "web development" concept, but the bare
+        word "web" did not, and at three characters it is too short to be
+        treated as a compound prefix. Someone listing Web as a target role
+        therefore saw every German web posting as outside their roles.
+        """
+
+        insight = self._insight(
+            job_title="Werkstudent Webentwicklung (m/w/d)",
+            desired_roles=["Web"],
+            job_skills=[],
+            job_requirements=[],
+        )
+        role_line = next(line for line in insight.preference_fit if "role" in line.title.lower())
+        self.assertTrue(role_line.positive, role_line.as_dict())
+
     def test_cv_alignment_reports_missing_requirements(self):
         insight = self._insight(job_skills=["Kubernetes"], job_requirements=[])
         self.assertTrue(any(not line.positive for line in insight.cv_alignment))
@@ -314,7 +368,7 @@ class MatchingEngineTests(APITestCase):
     def test_lines_serialise_to_contract_shape(self):
         insight = self._insight()
         for line in insight.cv_dicts:
-            self.assertEqual(set(line), {"positive", "title", "detail"})
+            self.assertEqual(set(line), {"positive", "title", "detail", "neutral"})
 
     def test_empty_skills_does_not_crash(self):
         insight = self._insight(profile_sections={}, job_skills=[], job_requirements=[])

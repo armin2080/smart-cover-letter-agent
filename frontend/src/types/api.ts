@@ -146,6 +146,9 @@ export interface MatchLine {
   positive: boolean
   title: string
   detail: string
+  /** True when the comparison could not be made, so the row is information
+   *  rather than a pass or a fail. */
+  neutral?: boolean
 }
 
 export interface MatchAnalysis {

@@ -9,9 +9,10 @@ import type { ApiError } from "../../lib/errors"
 import type { JobDetail as JobDetailData, JobStatus, MatchLine } from "../../types"
 
 function MatchRow({ line }: { line: MatchLine }) {
+  const state = line.neutral ? "neutral" : line.positive ? "good" : ""
   return (
-    <div className={`match-line ${line.positive ? "good" : ""}`}>
-      <span>{line.positive ? <Icon name="check" size={13} /> : "!"}</span>
+    <div className={`match-line ${state}`}>
+      <span>{line.neutral ? "–" : line.positive ? <Icon name="check" size={13} /> : "!"}</span>
       <p>
         <b>{line.title}</b>
         <small>{line.detail}</small>

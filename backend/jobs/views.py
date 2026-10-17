@@ -434,6 +434,7 @@ def _insight_for(user, job):
         keywords=list(getattr(preferences, "keywords", []) or []),
         profile_sections=sections,
         profile_summary=getattr(profile, "summary", "") or "",
+        radius_km=getattr(preferences, "radius_km", None),
     )
 
 

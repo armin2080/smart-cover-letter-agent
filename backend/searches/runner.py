@@ -31,7 +31,7 @@ from django.db import close_old_connections, connection, transaction
 from django.db.models import Q
 from django.utils import timezone
 
-from jobs.matching import build_insight
+from jobs.matching import _titles_overlap, build_insight
 from jobs.models import ActivityEntry, Job, job_fingerprint
 from jobs.sources.base import NormalizedJob, SearchRequest
 from jobs.sources.pipeline import PipelineResult, normalize_all, run_pipeline
@@ -168,6 +168,26 @@ def _profile_skill_terms(user) -> list[str]:
     return terms
 
 
+def _role_matching_titles(user, groups) -> list[str]:
+    """Titles among `groups` that match one of the user's desired roles.
+
+    Used to explain a filtered result: a listing that matches the roles but
+    never states an employment type is the one worth naming, because the user
+    would otherwise conclude nothing relevant was found.
+    """
+
+    desired_roles = list(getattr(getattr(user, "preferences", None), "desired_roles", []) or [])
+    if not desired_roles:
+        return []
+
+    titles: list[str] = []
+    for group in groups:
+        title = group.primary.title
+        if _titles_overlap(title, desired_roles):
+            titles.append(title[:60])
+    return titles
+
+
 def _build_request(run: SearchRun) -> SearchRequest:
     """Translate stored criteria into a provider-independent request."""
 
@@ -280,16 +300,25 @@ def _run(run_id: int) -> None:
         result.raw_count = len(raw_jobs)
         # The employment filter must apply to sample data too, otherwise a
         # working-student-only search would silently return unrelated roles.
-        result.jobs, result.untyped_withheld = split_by_employment_filter(
+        result.jobs, result.untyped_withheld_jobs = split_by_employment_filter(
             result.jobs, request.employment_types
         )
 
     described = sum(1 for group in result.jobs if group.primary.description)
     detail = f"{described} postings with details"
-    if result.untyped_withheld:
+    if result.untyped_withheld_jobs:
         # Surfaced here rather than only in the run notes, because the UI renders
         # stage details on a completed run but not its notes.
+        #
+        # The count alone reads as "nothing relevant was found", when the truth
+        # is often the opposite: the listings that did match the user's roles
+        # were set aside because the source never said what kind of contract
+        # they are. Naming them turns a dead end into a decision the user can
+        # act on — either widen the filter, or check those postings directly.
+        matching = _role_matching_titles(user, result.untyped_withheld_jobs)
         detail += f" · {result.untyped_withheld} untyped set aside"
+        if matching:
+            detail += f", {len(matching)} of them matched your roles ({', '.join(matching[:3])})"
     _set_stage(run, 1, "done", detail)
     time.sleep(_STAGE_PACING_SECONDS)
 
@@ -382,6 +411,7 @@ def _score(user, groups) -> list:
                 keywords=keywords,
                 profile_sections=sections,
                 profile_summary=getattr(profile, "summary", "") or "",
+                radius_km=getattr(preferences, "radius_km", None),
             )
         )
     return insights

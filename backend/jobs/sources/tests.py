@@ -1038,7 +1038,7 @@ class EmploymentFilterTests(TestCase):
         ]
         kept, withheld = split_by_employment_filter(groups, [EmploymentType.WORKING_STUDENT])
         self.assertEqual(len(kept), 1)
-        self.assertEqual(withheld, 2)
+        self.assertEqual(len(withheld), 2)
 
     def test_full_time_filter_excludes_student_roles(self):
         from jobs.sources.pipeline import apply_employment_filter

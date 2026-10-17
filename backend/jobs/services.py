@@ -53,6 +53,7 @@ def refresh_user_matches(user, *, only_statuses: set[str] | None = None) -> int:
             keywords=keywords,
             profile_sections=sections,
             profile_summary=profile_summary,
+            radius_km=getattr(preferences, "radius_km", None),
         )
 
         if job.match != insight.match or job.cv_alignment != insight.cv_dicts or job.preference_fit != insight.preference_dicts:

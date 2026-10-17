@@ -30,9 +30,19 @@ class MatchLine:
     positive: bool
     title: str
     detail: str
+    #: True when the comparison could not actually be made, so the line is
+    #: information rather than a pass or a fail. Such lines are kept out of
+    #: `pref_ratio`, because counting an unknown as a failure understates the
+    #: fit and counting it as a success overstates it.
+    neutral: bool = False
 
     def as_dict(self) -> dict:
-        return {"positive": self.positive, "title": self.title, "detail": self.detail}
+        return {
+            "positive": self.positive,
+            "title": self.title,
+            "detail": self.detail,
+            "neutral": self.neutral,
+        }
 
 
 @dataclass(frozen=True)
@@ -170,6 +180,7 @@ def build_insight(
     keywords: Iterable[str],
     profile_sections: dict[str, str],
     profile_summary: str = "",
+    radius_km: int | None = None,
 ) -> Insight:
     """Compare one job against a user's CV qualifications and preferences."""
 
@@ -323,14 +334,32 @@ def build_insight(
     if location_hit:
         pref_lines.append(MatchLine(True, "Location is compatible", f"{location} fits “{location_hit}”."))
     elif list(preferred_locations):
-        pref_lines.append(
-            MatchLine(
-                False,
-                "Location is outside your preferences",
-                f"This role is in {location or 'an unlisted location'}; you preferred "
-                f"{', '.join(list(preferred_locations)[:3])}.",
+        # A different city is only a mismatch when the user asked for that city
+        # exactly (radius 0). With a radius the boards are queried with it and
+        # return neighbouring towns — Bochum for a Dortmund search, say — which
+        # the user has already said they will travel to. Distance cannot be
+        # computed without coordinates, so the honest answer is that we do not
+        # know, not that the location is wrong.
+        if radius_km:
+            pref_lines.append(
+                MatchLine(
+                    False,
+                    "Different city in your search area",
+                    f"This role is in {location or 'an unlisted location'}; your search was "
+                    f"centred on {', '.join(list(preferred_locations)[:3])} with a "
+                    f"{radius_km} km radius. Confirm the commute.",
+                    neutral=True,
+                )
             )
-        )
+        else:
+            pref_lines.append(
+                MatchLine(
+                    False,
+                    "Location is outside your preferences",
+                    f"This role is in {location or 'an unlisted location'}; you preferred "
+                    f"{', '.join(list(preferred_locations)[:3])}.",
+                )
+            )
 
     employment_values = list(employment_types)
     if employment_type:
@@ -386,8 +415,13 @@ def build_insight(
     positive = sum(1 for line in cv_lines + pref_lines if line.positive)
     score = (positive / total) if total else 0.0
 
-    pref_positive = sum(1 for line in pref_lines if line.positive)
-    pref_ratio = pref_positive / len(pref_lines) if pref_lines else 1.0
+    pref_positive = sum(1 for line in pref_lines if line.positive and not line.neutral)
+    decisive_pref = [line for line in pref_lines if not line.neutral]
+    pref_ratio = (
+        sum(1 for line in decisive_pref if line.positive) / len(decisive_pref)
+        if decisive_pref
+        else 1.0
+    )
 
     skill_terms = normalise_terms(job_skills) or requirement_terms
     if job_skill_labels:

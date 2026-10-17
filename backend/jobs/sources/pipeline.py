@@ -55,7 +55,14 @@ class PipelineResult:
     raw_count: int = 0
     duplicates_removed: int = 0
     #: Listings set aside because the source never stated an employment type.
-    untyped_withheld: int = 0
+    #: The groups are kept, not just counted, because a listing that matches the
+    #: user's roles but omits its employment type is exactly the one worth
+    #: telling them about — a count alone leaves them unable to judge.
+    untyped_withheld_jobs: list[DeduplicatedJob] = field(default_factory=list)
+
+    @property
+    def untyped_withheld(self) -> int:
+        return len(self.untyped_withheld_jobs)
 
     @property
     def warnings(self) -> list[str]:
@@ -272,12 +279,11 @@ def apply_employment_filter(
 
 def split_by_employment_filter(
     jobs: list[DeduplicatedJob], employment_types: list
-) -> tuple[list[DeduplicatedJob], int]:
-    """Apply the filter and report how many listings were withheld.
+) -> tuple[list[DeduplicatedJob], list[DeduplicatedJob]]:
+    """Apply the filter and return `(kept, withheld)`.
 
-    Returns `(kept, withheld)`. The withheld count exists so the run can tell
-    the user that untyped listings were set aside, rather than dropping them
-    silently.
+    Withheld groups are returned rather than counted so the run can name the
+    ones that matched the user's roles instead of dropping them silently.
     """
 
     from jobs.sources.base import STUDENT_EMPLOYMENT_TYPES, EmploymentType
@@ -287,7 +293,7 @@ def split_by_employment_filter(
         wanted |= STUDENT_EMPLOYMENT_TYPES
 
     kept: list[DeduplicatedJob] = []
-    withheld = 0
+    withheld: list[DeduplicatedJob] = []
 
     for group in jobs:
         job_type = group.primary.employment_type
@@ -304,7 +310,7 @@ def split_by_employment_filter(
         if candidates and candidates <= wanted:
             kept.append(group)
         else:
-            withheld += 1
+            withheld.append(group)
 
     return kept, withheld
 
@@ -329,10 +335,9 @@ def run_pipeline(
     )
 
     if apply_filter:
-        result.jobs, withheld = split_by_employment_filter(
+        result.jobs, result.untyped_withheld_jobs = split_by_employment_filter(
             result.jobs, request.employment_types
         )
-        result.untyped_withheld = withheld
 
     if request.posted_within_days:
         from django.utils import timezone

@@ -61,8 +61,13 @@ _CONCEPTS: dict[str, dict[str, tuple[str, ...]]] = {
                "programmierer", "entwickler"),
     },
     "web development": {
+        # "web" on its own is a real thing people type into a role field, and
+        # without it a user asking for "Web" matched nothing German: the
+        # compound "webentwicklung" maps to this concept, but the bare word
+        # does not appear as a token in it, and "web" is too short to be
+        # treated as a compound prefix (which would wrongly accept "webdesign").
         "en": ("web development", "web developer", "frontend", "frontend developer",
-               "full stack", "fullstack"),
+               "full stack", "fullstack", "web"),
         "de": ("webentwicklung", "webentwickler", "webentwicklerin",
                "frontendentwickler", "frontend-entwickler"),
     },
