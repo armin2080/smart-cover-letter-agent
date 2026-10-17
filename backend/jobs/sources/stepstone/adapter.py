@@ -7,6 +7,7 @@ See `jobs/sources/registry.py`.
 from __future__ import annotations
 
 import logging
+import math
 from urllib.parse import quote
 
 from django.conf import settings
@@ -32,12 +33,14 @@ class StepStoneAdapter(JobSourceAdapter):
         )
 
     def search(self, request: SearchRequest) -> list[RawJob]:
-        """Search once per keyword and merge the results.
+        """Search every keyword, in every requested location, and merge.
 
-        Only the first keyword used to be searched, so a user whose desired
-        roles are `["AI", "Data", "Web"]` had every source queried for the
-        literal string "AI" — which returns nothing, and looked like the
-        sources were broken rather than the query.
+        Both loops matter. Only the first keyword used to be searched, so a
+        user whose desired roles are `["AI", "Data", "Web"]` had every source
+        queried for the literal string "AI" — which returns nothing, and looked
+        like the sources were broken rather than the query. Only the first
+        location was used either, so adding a second city to the preferences
+        silently changed nothing at all.
 
         The number of queries is capped: each one costs a request, and this
         adapter talks to a real platform.
@@ -46,22 +49,44 @@ class StepStoneAdapter(JobSourceAdapter):
         jobs: list[RawJob] = []
         seen: set[str] = set()
         limit = min(request.max_results or settings.SOURCE_MAX_RESULTS, settings.SOURCE_MAX_RESULTS)
+        locations = request.locations or ["Deutschland"]
 
-        for term in _search_terms(request):
+        # Split the allowance between locations. Without this a rich first city
+        # satisfies `limit` on its own and the later ones are never searched,
+        # which is indistinguishable from the second city being ignored.
+        per_location = max(1, limit // len(locations))
+
+        # ...and split it again between terms. A broad term such as "AI" returns
+        # enough listings to fill the whole location on its own, so every
+        # specific term after it — "Machine Learning", "Computer Vision" — was
+        # never queried. Worse, those broad results are poor: a StepStone search
+        # for "AI" comes back with childcare and cleaning jobs. Covering each
+        # term a little beats filling the page with one of them.
+        terms = _search_terms(request)
+        per_term = max(1, math.ceil(per_location / max(1, len(terms))))
+
+        for location in locations:
             if len(jobs) >= limit:
                 break
-            for job in self._search_term(term, request, limit - len(jobs)):
-                key = job.external_id or job.url or job.title.lower()
-                if key in seen:
-                    continue
-                seen.add(key)
-                jobs.append(job)
+
+            found_here = 0
+            for term in terms:
+                if found_here >= per_location or len(jobs) >= limit:
+                    break
+
+                remaining = min(per_term, per_location - found_here, limit - len(jobs))
+                for job in self._search_term(term, location, remaining):
+                    key = job.external_id or job.url or job.title.lower()
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    jobs.append(job)
+                    found_here += 1
 
         return jobs
 
-    def _search_term(self, term: str, request: SearchRequest, remaining: int) -> list[RawJob]:
+    def _search_term(self, term: str, location: str, remaining: int) -> list[RawJob]:
         jobs: list[RawJob] = []
-        location = request.locations[0] if request.locations else "Deutschland"
 
         # StepStone expects spaces as '+', not '%20'.
         search_path = parser.build_search_url(quote(term), quote(location))

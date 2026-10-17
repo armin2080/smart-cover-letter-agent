@@ -79,8 +79,27 @@ class StellenwerkParserTests(SimpleTestCase):
         self.assertEqual(parser.resolve_city("Köln"), "koeln")
         self.assertEqual(parser.resolve_city("Cologne"), "koeln")
 
-    def test_unknown_city_falls_back(self):
-        self.assertEqual(parser.resolve_city("Nowhereville"), "dortmund")
+    def test_an_umlaut_city_resolves_to_its_slug(self):
+        """Regression: "Düsseldorf" matched nothing and became Dortmund.
+
+        `KNOWN_CITIES` holds the ASCII slug "duesseldorf", so the umlaut had to
+        be folded first. Without that a user adding Düsseldorf to their
+        locations was silently shown Dortmund jobs instead.
+        """
+
+        self.assertEqual(parser.resolve_city("Düsseldorf"), "duesseldorf")
+        self.assertEqual(parser.resolve_city("Dusseldorf"), "duesseldorf")
+        self.assertEqual(parser.resolve_city("düsseldorf"), "duesseldorf")
+
+    def test_unknown_city_resolves_to_nothing(self):
+        """Returning another city would misreport where the jobs are.
+
+        A default is not a safe failure here: the result looks identical to a
+        genuine match on the requested city.
+        """
+
+        self.assertIsNone(parser.resolve_city("Nowhereville"))
+        self.assertIsNone(parser.resolve_city(""))
 
     def test_parses_job_cards_only(self):
         jobs = parser.parse_city_page(CITY_FIXTURE, city="dortmund")
@@ -139,6 +158,35 @@ class StellenwerkAdapterTests(SimpleTestCase):
         adapter = self._adapter({"stellenwerk.de": CITY_FIXTURE})
         jobs = adapter.search(SearchRequest(keywords=["x"], locations=["Dortmund"], max_results=1))
         self.assertEqual(len(jobs), 1)
+
+    def test_every_location_is_requested(self):
+        """Regression: only `locations[0]` was ever fetched.
+
+        Adding a second city to the preferences changed nothing, and there was
+        no sign of it in the result — the same silent no-op as only passing
+        the first keyword.
+        """
+
+        adapter = self._adapter({"stellenwerk.de": CITY_FIXTURE})
+        adapter.search(
+            SearchRequest(keywords=["x"], locations=["Dortmund", "Düsseldorf"], max_results=10)
+        )
+
+        requested = [url for url, _ in adapter.client.calls]
+        self.assertTrue(any("/dortmund" in url for url in requested), requested)
+        self.assertTrue(any("/duesseldorf" in url for url in requested), requested)
+
+    def test_an_uncovered_location_does_not_borrow_another_city(self):
+        """Jobs from a city the user never asked for must not be returned."""
+
+        adapter = self._adapter({"stellenwerk.de": CITY_FIXTURE})
+        jobs = adapter.search(
+            SearchRequest(keywords=["x"], locations=["Nowhereville", "Dortmund"], max_results=10)
+        )
+
+        requested = [url for url, _ in adapter.client.calls]
+        self.assertTrue(all("/dortmund" in url for url in requested), requested)
+        self.assertEqual(len(jobs), 2)
 
     def test_enrichment_adds_description(self):
         adapter = self._adapter({"dortmund/werkstudent": DETAIL_FIXTURE})

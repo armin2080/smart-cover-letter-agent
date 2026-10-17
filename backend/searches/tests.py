@@ -401,6 +401,35 @@ class ProfileSkillSearchTests(APITestCase):
         self.assertEqual(keywords[0], "AI")
         self.assertLess(keywords.index("AI"), keywords.index("Python"))
 
+    def test_many_roles_do_not_starve_the_skills(self):
+        """Five roles must not consume the whole query budget.
+
+        The adapters query only the first few terms. With roles concatenated
+        ahead of skills, five desired roles filled that budget on their own, so
+        a profile's real differentiators — "Machine Learning", "Computer
+        Vision" — were never sent to any platform. That fails silently: the
+        search simply looks like it found nothing relevant.
+        """
+
+        from jobs.sources.base import MAX_SEARCH_TERMS
+
+        self.user.preferences.desired_roles = ["AI", "Data", "Automation", "Prompt", "Web"]
+        self.user.preferences.save()
+        self.user.profile_sections.update_or_create(
+            key="skills",
+            defaults={"title": "Skills", "content": "Python, Machine Learning, Computer Vision"},
+        )
+
+        keywords = self._request().keywords
+        used = keywords[:MAX_SEARCH_TERMS]
+
+        self.assertIn("Data", used, used)
+        self.assertIn("Python", used, used)
+        self.assertTrue(
+            any("learning" in term.lower() or "vision" in term.lower() for term in used),
+            used,
+        )
+
     def test_profile_skills_are_included(self):
         keywords = self._request().keywords
         for skill in ("Python", "Linux", "Netzwerk", "Docker"):

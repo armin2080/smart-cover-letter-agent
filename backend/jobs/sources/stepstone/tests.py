@@ -156,6 +156,71 @@ class StepStoneAdapterTests(SimpleTestCase):
         )
         self.assertEqual(len(jobs), 1)
 
+    def test_every_location_is_searched(self):
+        """Regression: only `locations[0]` was ever queried.
+
+        A user who added a second city to their preferences got exactly the
+        same results as before, with nothing to indicate the city was ignored.
+        """
+
+        adapter = self._adapter(
+            [RESULT_FIXTURE, EMPTY_FIXTURE, RESULT_FIXTURE, EMPTY_FIXTURE]
+        )
+        adapter.search(
+            SearchRequest(
+                keywords=["Werkstudent"],
+                locations=["Dortmund", "Düsseldorf"],
+                max_results=10,
+            )
+        )
+
+        searched = [call[1]["json"]["url"] for call in adapter.client.calls]
+        self.assertTrue(any("in-Dortmund" in url for url in searched), searched)
+        self.assertTrue(any("in-D%C3%BCsseldorf" in url for url in searched), searched)
+
+    def test_the_budget_is_shared_between_locations(self):
+        """A rich first city must not leave the second one unsearched.
+
+        The stub answers with the same fixture either way, so the listings
+        deduplicate; what matters is that the second city was queried at all.
+        Without the split the first city satisfies `max_results` on its own and
+        the loop stops before reaching the second.
+        """
+
+        adapter = self._adapter([RESULT_FIXTURE, EMPTY_FIXTURE] * 4)
+        adapter.search(
+            SearchRequest(
+                keywords=["Werkstudent"],
+                locations=["Dortmund", "Düsseldorf"],
+                max_results=2,
+            )
+        )
+
+        searched = [call[1]["json"]["url"] for call in adapter.client.calls]
+        self.assertTrue(any("in-Dortmund" in url for url in searched), searched)
+        self.assertTrue(any("D%C3%BCsseldorf" in url for url in searched), searched)
+    def test_one_broad_term_cannot_consume_the_whole_budget(self):
+        """Every term must be queried, not just the first.
+
+        A broad term such as "AI" returns enough listings to fill the entire
+        allowance on its own, so "Machine Learning" and "Computer Vision" after
+        it were never sent to StepStone. Those are the terms that actually find
+        the relevant postings — a bare search for "AI" comes back with
+        childcare and cleaning jobs.
+        """
+
+        adapter = self._adapter([RESULT_FIXTURE] * 24)
+        adapter.search(
+            SearchRequest(
+                keywords=["AI", "Machine Learning", "Computer Vision"],
+                locations=["Dortmund"],
+                max_results=6,
+            )
+        )
+
+        searched = " | ".join(call[1]["json"]["url"] for call in adapter.client.calls)
+        self.assertIn("Machine%20Learning", searched)
+        self.assertIn("Computer%20Vision", searched)
     def test_normalize_classifies_employment_type(self):
         adapter = self._adapter([RESULT_FIXTURE])
         job = parser.parse_result_list(RESULT_FIXTURE)[0][0]

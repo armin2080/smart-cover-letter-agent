@@ -52,18 +52,37 @@ _CITY_ALIASES = {
     "münchen": "muenchen",
 }
 
+#: German characters folded to their ASCII transliteration before matching.
+#: `KNOWN_CITIES` uses slugs like "duesseldorf", so without this "Düsseldorf"
+#: matched nothing at all.
+_UMLAUT_FOLD = str.maketrans({"ä": "ae", "ö": "oe", "ü": "ue", "ß": "ss"})
 
-def resolve_city(location: str) -> str:
-    """Map a user location label onto a Stellenwerk city slug."""
 
-    lowered = (location or "").lower().strip()
+def _fold(text: str) -> str:
+    return (text or "").lower().strip().translate(_UMLAUT_FOLD)
+
+
+def resolve_city(location: str) -> str | None:
+    """Map a user location label onto a Stellenwerk city slug.
+
+    Returns `None` when the location cannot be addressed. Callers must not
+    substitute a default city: quietly returning another city's jobs is worse
+    than returning none, because nothing in the result reveals the swap. That
+    is exactly what used to happen — "Düsseldorf" failed to match the known
+    slug and every Düsseldorf search was answered with Dortmund.
+    """
+
+    folded = _fold(location)
+    if not folded:
+        return None
+
     for alias, slug in _CITY_ALIASES.items():
-        if alias in lowered:
+        if alias in folded:
             return slug
     for city in KNOWN_CITIES:
-        if city in lowered:
+        if city in folded:
             return city
-    return "dortmund"
+    return None
 
 
 def _clean(text: str) -> str:

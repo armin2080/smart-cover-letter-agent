@@ -213,16 +213,26 @@ def _build_request(run: SearchRun) -> SearchRequest:
         except ValueError:
             continue
 
-    # What the user asked for comes first; profile skills follow as a
-    # broadening pass. The adapters cap how many terms they actually use, so
-    # this ordering decides what survives that cap.
+    # Roles and skills are interleaved rather than concatenated. The adapters
+    # cap how many terms they query, so a strict roles-first order lets five
+    # desired roles consume the entire allowance and the specific skills that
+    # actually distinguish the search — "Machine Learning", "Computer Vision" —
+    # are never sent to the platform at all. Alternating keeps both kinds of
+    # term inside the budget.
+    role_terms = as_list("roles")
+    skill_terms = _profile_skill_terms(run.user)
+
+    ordered: list[str] = []
+    for index in range(max(len(role_terms), len(skill_terms))):
+        if index < len(role_terms):
+            ordered.append(role_terms[index])
+        if index < len(skill_terms):
+            ordered.append(skill_terms[index])
+    ordered.extend(as_list("keywords"))
+
     keywords: list[str] = []
     seen: set[str] = set()
-    for term in [
-        *as_list("roles"),
-        *_profile_skill_terms(run.user),
-        *as_list("keywords"),
-    ]:
+    for term in ordered:
         cleaned = (term or "").strip()
         if cleaned and cleaned.lower() not in seen:
             seen.add(cleaned.lower())

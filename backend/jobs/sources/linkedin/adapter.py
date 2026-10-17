@@ -8,10 +8,11 @@ See `jobs/sources/registry.py`.
 from __future__ import annotations
 
 import logging
+import math
 
 from django.conf import settings
 
-from jobs.sources.base import JobSourceAdapter, RawJob, SearchRequest
+from jobs.sources.base import JobSourceAdapter, RawJob, SearchRequest, _search_terms
 from jobs.sources.http import SourceBlocked, SourceHttpClient
 from jobs.sources.linkedin import parser
 
@@ -33,43 +34,67 @@ class LinkedInAdapter(JobSourceAdapter):
     def search(self, request: SearchRequest) -> list[RawJob]:
         jobs: list[RawJob] = []
         seen: set[str] = set()
-        keywords = request.keywords or ["Werkstudent"]
-        location = request.locations[0] if request.locations else "Deutschland"
         limit = min(request.max_results or settings.SOURCE_MAX_RESULTS, settings.SOURCE_MAX_RESULTS)
+        locations = request.locations or ["Deutschland"]
 
-        for keyword in keywords[:3]:
-            offset = 0
-            while len(jobs) < limit and offset < MAX_OFFSET:
-                try:
-                    response = self.client.get(
-                        f"{parser.BASE_URL}{parser.SEARCH_ENDPOINT}",
-                        params={"keywords": keyword, "location": location, "start": offset},
-                    )
-                except SourceBlocked:
-                    # Surface to the pipeline: rate limited or forbidden. Never retried.
-                    raise
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("LinkedIn search failed at offset %s: %s", offset, exc)
+        # Same two-loop shape as the other adapters: every term, in every
+        # requested location. Using the shared helper also means the search
+        # gets the cross-language expansions instead of a hardcoded slice of
+        # the raw keyword list.
+        per_location = max(1, limit // len(locations))
+
+        # The same split between terms: one broad term can otherwise fill the
+        # whole allowance and leave the specific ones unqueried.
+        terms = _search_terms(request)
+        per_term = max(1, math.ceil(per_location / max(1, len(terms))))
+
+        for location in locations:
+            if len(jobs) >= limit:
+                break
+
+            found_here = 0
+            for keyword in terms:
+                if found_here >= per_location or len(jobs) >= limit:
                     break
 
-                page = parser.parse_search_page(response.text)
-                if not page:
-                    break
-
-                added = 0
-                for job in page:
-                    key = job.external_id or job.url or job.title.lower()
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    jobs.append(job)
-                    added += 1
-                    if len(jobs) >= limit:
+                offset = 0
+                term_ceiling = min(per_term, per_location)
+                while (
+                    found_here < term_ceiling
+                    and len(jobs) < limit
+                    and offset < MAX_OFFSET
+                ):
+                    try:
+                        response = self.client.get(
+                            f"{parser.BASE_URL}{parser.SEARCH_ENDPOINT}",
+                            params={"keywords": keyword, "location": location, "start": offset},
+                        )
+                    except SourceBlocked:
+                        # Surface to the pipeline: rate limited or forbidden. Never retried.
+                        raise
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning("LinkedIn search failed at offset %s: %s", offset, exc)
                         break
 
-                if added == 0:
-                    break
-                offset += PAGE_SIZE
+                    page = parser.parse_search_page(response.text)
+                    if not page:
+                        break
+
+                    added = 0
+                    for job in page:
+                        key = job.external_id or job.url or job.title.lower()
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        jobs.append(job)
+                        added += 1
+                        found_here += 1
+                        if found_here >= term_ceiling or len(jobs) >= limit:
+                            break
+
+                    if added == 0:
+                        break
+                    offset += PAGE_SIZE
 
         return jobs
 
