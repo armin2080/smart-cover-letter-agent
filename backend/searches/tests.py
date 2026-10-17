@@ -24,6 +24,7 @@ from .runner import (
     build_stages,
     criteria_from_preferences,
     execute_search_sync,
+    run_scheduled_searches,
     set_pacing,
     summarise_criteria,
 )
@@ -89,6 +90,87 @@ class AutoSearchScheduleTests(APITestCase):
         self.auto.last_error = "LinkedIn timed out"
         self.auto.save()
         self.assertEqual(self.auto.status, AutoSearchSettings.Status.ERROR)
+
+
+@platform_providers_disabled()
+class ScheduledSearchRunnerTests(APITestCase):
+    """The trigger for automatic search is external; this is what it calls.
+
+    The application cannot schedule itself, so correctness here decides whether
+    "automatic search" means anything at all. The timer ticks far more often
+    than any user's schedule, which makes the due-check the load-bearing part.
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_user(email="scheduler@example.com", password=PASSWORD)
+        self.auto = AutoSearchSettings.objects.get_or_create(user=self.user)[0]
+        self.override = override_settings(SEARCH_RUN_ASYNC=False)
+        self.override.enable()
+        set_pacing(0)
+
+    def tearDown(self):
+        self.override.disable()
+
+    def _set_next_run(self, when):
+        AutoSearchSettings.objects.filter(pk=self.auto.pk).update(next_run_at=when)
+
+    def test_a_user_who_is_not_due_is_left_alone(self):
+        self._set_next_run(timezone.now() + timedelta(hours=6))
+        self.assertEqual(run_scheduled_searches(), 0)
+        self.assertFalse(SearchRun.objects.exists())
+
+    def test_a_due_user_completes_inside_the_call(self):
+        """A run left at "queued" is what a killed background thread produces.
+
+        The command's process exits as soon as it returns, so the search has to
+        finish before that happens.
+        """
+
+        self._set_next_run(timezone.now() - timedelta(minutes=1))
+
+        self.assertEqual(run_scheduled_searches(), 1)
+
+        run = SearchRun.objects.get(user=self.user)
+        self.assertEqual(run.mode, SearchRun.Mode.AUTOMATIC)
+        self.assertEqual(run.status, SearchRun.Status.COMPLETED)
+
+    def test_the_schedule_moves_forward_after_a_run(self):
+        self._set_next_run(timezone.now() - timedelta(minutes=1))
+
+        run_scheduled_searches()
+
+        self.auto.refresh_from_db()
+        self.assertIsNotNone(self.auto.last_run_at)
+        self.assertGreater(self.auto.next_run_at, timezone.now())
+
+    def test_force_runs_even_when_not_due(self):
+        self._set_next_run(timezone.now() + timedelta(hours=6))
+        self.assertEqual(run_scheduled_searches(force=True), 1)
+
+    def test_a_disabled_user_is_never_run(self):
+        self.auto.enabled = False
+        self.auto.save()
+        self.assertEqual(run_scheduled_searches(force=True), 0)
+
+    def test_a_user_with_a_run_in_progress_is_skipped(self):
+        """A slow or hung run must not stack a second copy behind itself."""
+
+        self._set_next_run(timezone.now() - timedelta(minutes=1))
+        SearchRun.objects.create(
+            user=self.user,
+            status=SearchRun.Status.RUNNING,
+            criteria={},
+            sources=[],
+            stages=build_stages(),
+        )
+
+        self.assertEqual(run_scheduled_searches(), 0)
+
+    def test_a_missing_next_run_is_treated_as_due(self):
+        """Better to run an unscheduled search than never run one at all."""
+
+        self._set_next_run(None)
+        self.assertEqual(run_scheduled_searches(), 1)
 
 
 @platform_providers_disabled()

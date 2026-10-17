@@ -98,6 +98,53 @@ curl -s -o /dev/null -w "type=%{content_type} size=%{size_download}\n" \
      -H "Host: sca.armin2080.de" "http://127.0.0.1:8082$JS"
 ```
 
+## Automatic search needs an external trigger
+
+Django cannot schedule work for itself. `AutoSearchSettings.next_run_at` only
+records when a run *should* happen; something outside the web process has to
+come along and ask for it. Without that, enabling automatic search in the UI
+does nothing but display a time that never arrives — and the UI is honest about
+this through `schedulerActive`, which is driven by `AUTO_SEARCH_SCHEDULER_ENABLED`.
+
+The trigger is cron, installed for `codex` (no root needed):
+
+```bash
+crontab -l 2>/dev/null | cat > /tmp/sca-cron
+cat >> /tmp/sca-cron <<'CRON'
+# Automatic job search. Ticks quarter-hourly; the command itself decides which
+# users are due, so scheduling is not tied to this interval.
+# choom makes this process the first OOM casualty on a 458MB box, so it can
+# never take Radmin down with it.
+0,15,30,45 * * * * cd /home/codex/sca/app/backend && nice -n 10 choom -n 900 -- /home/codex/sca/venv/bin/python manage.py run_scheduled_searches >> /home/codex/sca/data/scheduler.log 2>&1
+CRON
+crontab /tmp/sca-cron && rm /tmp/sca-cron
+```
+
+Then tell the UI it exists:
+
+```bash
+sed -i 's/^AUTO_SEARCH_SCHEDULER_ENABLED=.*/AUTO_SEARCH_SCHEDULER_ENABLED=true/' \
+  /home/codex/sca/app/backend/.env
+sudo systemctl restart sca
+```
+
+Set it back to `false` if cron is ever removed; the flag describes whether a
+trigger exists, not whether users want automatic search.
+
+Check it without waiting for the clock:
+
+```bash
+cd /home/codex/sca/app/backend
+/home/codex/sca/venv/bin/python manage.py run_scheduled_searches
+# "No automatic searches are due right now." is the healthy answer most of the time
+tail -20 /home/codex/sca/data/scheduler.log
+```
+
+Runs execute **inline** inside that command, not in a background thread. A
+daemon thread would be killed the instant the cron process exits, leaving the
+run stuck at `running` forever; that failure is silent, since the exit status is
+still 0.
+
 Expect `text/javascript` and a size in the hundreds of KB. Anything else means
 the SPA fallback is swallowing build output.
 

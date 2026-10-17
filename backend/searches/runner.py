@@ -28,6 +28,7 @@ import time
 
 from django.conf import settings
 from django.db import close_old_connections, connection, transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from jobs.matching import build_insight
@@ -484,11 +485,43 @@ def criteria_from_preferences(user, sources: list[str] | None = None) -> dict:
     }
 
 
-def run_scheduled_searches() -> int:
-    """Start a search for every user with automatic search enabled."""
+def run_scheduled_searches(*, force: bool = False, now=None) -> int:
+    """Start a search for every user whose scheduled time has arrived.
+
+    Invoked from `manage.py run_scheduled_searches`, which an external timer
+    (cron, systemd timer) calls. That process is short-lived, so runs execute
+    inline: `start_search` would hand the work to a daemon thread that is
+    killed the moment the command returns, leaving the run stuck at "running"
+    forever and the user with nothing.
+
+    Only runs that are actually due are started. A timer ticks far more often
+    than any user's schedule (quarter-hourly, say), so without this check a
+    daily setting would fire once per tick.
+
+    A user who still has a queued or running search is skipped, so a slow or
+    hung run cannot stack up behind itself.
+    """
+
+    now = now or timezone.now()
+
+    due = AutoSearchSettings.objects.filter(enabled=True).select_related("user")
+    if not force:
+        # `next_run_at` is null only for a row saved before it was populated,
+        # which should still run rather than never run.
+        due = due.filter(Q(next_run_at__lte=now) | Q(next_run_at__isnull=True))
+
+    in_flight = set(
+        SearchRun.objects.filter(
+            status__in=[SearchRun.Status.QUEUED, SearchRun.Status.RUNNING]
+        ).values_list("user_id", flat=True)
+    )
 
     started = 0
-    for auto in AutoSearchSettings.objects.filter(enabled=True).select_related("user"):
+    for auto in due:
+        if auto.user_id in in_flight:
+            logger.info("Skipping scheduled search for user %s: a run is in progress", auto.user_id)
+            continue
+
         criteria = criteria_from_preferences(auto.user, sources=list(auto.sources or []))
 
         run = SearchRun.objects.create(
@@ -500,7 +533,7 @@ def run_scheduled_searches() -> int:
             sources=list(auto.sources or []),
             stages=build_stages(),
         )
-        start_search(run.id)
+        execute_search_sync(run.id)
         started += 1
 
     return started

@@ -75,7 +75,10 @@ SOURCE_HTTP_MAX_ATTEMPTS=2
 SOURCE_MAX_RESULTS=30
 SOURCE_ENRICH_LIMIT=6
 
-# No scheduler is wired up, so the UI must not promise a next run.
+# Whether an external timer actually calls `manage.py run_scheduled_searches`.
+# Keep false on a fresh box: there is no cron entry yet, and the UI uses this to
+# avoid promising a next run that nothing will trigger. Set it to true at the
+# same time the cron entry is installed (see deploy/README.md).
 AUTO_SEARCH_SCHEDULER_ENABLED=false
 
 CV_MAX_UPLOAD_BYTES=10485760
