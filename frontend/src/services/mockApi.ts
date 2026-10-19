@@ -349,6 +349,11 @@ export const mockApi: ApiSurface = {
         results = results.filter((job) => job.employmentType === filters.employmentType)
       }
       if (filters.match) results = results.filter((job) => job.match === filters.match)
+      if (filters.language && filters.language !== "any") {
+        // Undetermined languages have no tab of their own, so they appear only
+        // in the unfiltered list — the same rule the backend applies.
+        results = results.filter((job) => (job.language ?? "unknown") === filters.language)
+      }
       if (filters.company) {
         results = results.filter((job) => job.company.toLowerCase().includes(filters.company!.toLowerCase()))
       }
@@ -373,11 +378,20 @@ export const mockApi: ApiSurface = {
 
     async counts() {
       await delay(120)
+      const byLanguage = (language: string) =>
+        state.jobs.filter((job) => (job.language ?? "unknown") === language).length
+
       return {
         new: state.jobs.filter((job) => job.status === "new").length,
         reviewed: state.jobs.filter((job) => job.status === "reviewed").length,
         saved: state.jobs.filter((job) => job.status === "saved").length,
         dismissed: state.jobs.filter((job) => job.status === "dismissed").length,
+        languages: {
+          any: state.jobs.length,
+          german: byLanguage("german"),
+          english: byLanguage("english"),
+          unknown: byLanguage("unknown"),
+        },
       }
     },
 

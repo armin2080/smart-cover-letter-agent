@@ -74,6 +74,44 @@ class LanguageRequirement(str, Enum):
         }
 
 
+class LanguageFilter(str, Enum):
+    """Which postings a user wants to see, by the language they are written in.
+
+    Kept separate from `Language` because "any" is a legitimate preference and
+    "unknown" is not: a user can ask for every language, but nobody wants to
+    filter *for* postings whose language could not be determined. `UNKNOWN` is
+    an outcome of detection, not something to search on.
+    """
+
+    ANY = "any"
+    GERMAN = "german"
+    ENGLISH = "english"
+
+    @property
+    def label(self) -> str:
+        return {
+            LanguageFilter.ANY: "Any language",
+            LanguageFilter.GERMAN: "German",
+            LanguageFilter.ENGLISH: "English",
+        }[self]
+
+
+def matches_language_filter(language: Language | str, wanted: LanguageFilter | str) -> bool:
+    """True when a posting's language satisfies the preference."""
+
+    try:
+        wanted_filter = LanguageFilter(wanted)
+    except ValueError:
+        # An unrecognised preference is treated as "no preference" rather than
+        # hiding everything, which would look like the search was broken.
+        return True
+
+    if wanted_filter is LanguageFilter.ANY:
+        return True
+
+    return str(getattr(language, "value", language)) == wanted_filter.value
+
+
 # --------------------------------------------------------------------------- #
 # Language of the text                                                        #
 # --------------------------------------------------------------------------- #

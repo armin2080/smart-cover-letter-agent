@@ -246,6 +246,7 @@ def _build_request(run: SearchRun) -> SearchRequest:
         sources=list(run.sources or []),
         posted_within_days=criteria.get("posted_within_days"),
         work_models=work_models,
+        language_filter=criteria.get("language_filter") or "any",
         max_results=settings.SOURCE_MAX_RESULTS,
     )
 
@@ -304,14 +305,18 @@ def _run(run_id: int) -> None:
 
     if sample_mode:
         from jobs.sources.dedup import deduplicate
-        from jobs.sources.pipeline import split_by_employment_filter
+        from jobs.sources.pipeline import split_by_employment_filter, split_by_language_filter
 
         result.jobs = deduplicate(normalize_all(raw_jobs))
         result.raw_count = len(raw_jobs)
-        # The employment filter must apply to sample data too, otherwise a
-        # working-student-only search would silently return unrelated roles.
+        # The filters must apply to sample data too, otherwise a
+        # working-student-only or German-only search would silently return
+        # listings the user ruled out.
         result.jobs, result.untyped_withheld_jobs = split_by_employment_filter(
             result.jobs, request.employment_types
+        )
+        result.jobs, result.language_withheld_jobs = split_by_language_filter(
+            result.jobs, request.language_filter
         )
 
     described = sum(1 for group in result.jobs if group.primary.description)
@@ -329,6 +334,13 @@ def _run(run_id: int) -> None:
         detail += f" · {result.untyped_withheld} untyped set aside"
         if matching:
             detail += f", {len(matching)} of them matched your roles ({', '.join(matching[:3])})"
+    if result.language_withheld_jobs:
+        # Named separately from the employment filter so the user can tell
+        # which preference removed a listing, and knows which one to change.
+        detail += (
+            f" · {result.language_withheld} set aside for language"
+            f" ({request.language_filter})"
+        )
     _set_stage(run, 1, "done", detail)
     time.sleep(_STAGE_PACING_SECONDS)
 
@@ -520,6 +532,7 @@ def criteria_from_preferences(user, sources: list[str] | None = None) -> dict:
         "radius_km": getattr(preferences, "radius_km", 50),
         "employment_types": list(getattr(preferences, "employment_types", []) or []),
         "keywords": list(getattr(preferences, "keywords", []) or []),
+        "language_filter": getattr(preferences, "language_filter", "any") or "any",
         "sources": list(sources or []),
         "use_saved_preferences": True,
     }
@@ -592,4 +605,9 @@ def summarise_criteria(criteria: dict) -> str:
     radius = criteria.get("radius_km", criteria.get("radiusKm"))
     if radius is not None:
         parts.append(f"{radius} km")
+    # Only worth showing when it narrows the search; "any language" is the
+    # default and would just add noise to every history row.
+    language_filter = criteria.get("language_filter") or "any"
+    if language_filter != "any":
+        parts.append(language_filter.capitalize())
     return " · ".join(parts) or "Profile preferences"

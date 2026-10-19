@@ -10,11 +10,11 @@ import { useAsync } from "../../hooks/useAsync"
 import { useDebounced } from "../../hooks/useDebounced"
 import { normalizeError } from "../../lib/errors"
 import { relativeTime } from "../../lib/format"
-import { EMPLOYMENT_OPTIONS, MATCH_OPTIONS, SOURCE_OPTIONS, employmentLabel, statusLabel } from "../../lib/labels"
+import { EMPLOYMENT_OPTIONS, LANGUAGE_TABS, MATCH_OPTIONS, SOURCE_OPTIONS, employmentLabel, statusLabel } from "../../lib/labels"
 import { api } from "../../services/api"
 import { ManualImportDialog } from "../../components/jobs/ManualImportDialog"
 import { JobDetail } from "./JobDetail"
-import type { JobFilters, JobStatus } from "../../types"
+import type { JobFilters, JobStatus, LanguageFilter } from "../../types"
 
 const TABS: JobStatus[] = ["new", "reviewed", "saved", "dismissed"]
 
@@ -32,6 +32,7 @@ export function MyJobsPage() {
   const toast = useToast()
 
   const [tab, setTab] = useState<JobStatus>("new")
+  const [language, setLanguage] = useState<LanguageFilter>("any")
   const [query, setQuery] = useState("")
   const [filters, setFilters] = useState<FilterState>(EMPTY_FILTERS)
   const [filtersOpen, setFiltersOpen] = useState(false)
@@ -48,10 +49,14 @@ export function MyJobsPage() {
     source: filters.source || undefined,
     match: (filters.match || undefined) as JobFilters["match"],
     employmentType: filters.employmentType || undefined,
+    // "any" must not be sent: undetermined languages belong in the full list,
+    // so only a real narrowing is passed through.
+    language: language === "any" ? undefined : language,
   }
 
   const jobs = useAsync((signal) => api.jobs.list(listFilters, { signal }), [
     tab,
+    language,
     debouncedQuery,
     filters.location,
     filters.source,
@@ -113,6 +118,9 @@ export function MyJobsPage() {
 
   const results = jobs.data?.results ?? []
   const activeFilters = Object.values(filters).filter(Boolean).length
+  // A language selection narrows the list too, so it counts when deciding
+  // whether the empty state is "nothing found" or "nothing searched yet".
+  const narrowed = activeFilters > 0 || language !== "any"
 
   return (
     <div className="jobs-page">
@@ -141,6 +149,25 @@ export function MyJobsPage() {
           >
             {statusLabel(entry)}
             <span>{counts.data?.[entry] ?? 0}</span>
+          </button>
+        ))}
+      </div>
+
+      {/* Language is a second, independent axis: the same job list split by the
+          language the advert is written in. Kept as its own bar so it composes
+          with the status tabs instead of replacing them. */}
+      <div className="language-tabs" role="tablist" aria-label="Filter by posting language">
+        {LANGUAGE_TABS.map((entry) => (
+          <button
+            className={language === entry.value ? "active" : ""}
+            onClick={() => setLanguage(entry.value)}
+            key={entry.value}
+            type="button"
+            role="tab"
+            aria-selected={language === entry.value}
+          >
+            {entry.label}
+            <span>{counts.data?.languages?.[entry.value] ?? 0}</span>
           </button>
         ))}
       </div>
@@ -289,18 +316,19 @@ export function MyJobsPage() {
                   icon="briefcase"
                   title={`No ${tab} jobs`}
                   description={
-                    activeFilters || debouncedQuery
+                    narrowed || debouncedQuery
                       ? "No roles match your current filters. Try adjusting or clearing them."
                       : tab === "new"
                         ? "Run a search to discover roles that fit your profile."
                         : `Jobs you mark as ${tab} will appear here.`
                   }
                   action={
-                    activeFilters || debouncedQuery ? (
+                    narrowed || debouncedQuery ? (
                       <Button
                         kind="secondary"
                         onClick={() => {
                           setFilters(EMPTY_FILTERS)
+                          setLanguage("any")
                           setQuery("")
                         }}
                       >

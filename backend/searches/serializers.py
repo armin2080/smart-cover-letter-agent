@@ -24,6 +24,9 @@ class SearchCriteriaSerializer(serializers.Serializer):
     keywords = serializers.ListField(
         child=serializers.CharField(max_length=120), required=False, default=list
     )
+    languageFilter = serializers.ChoiceField(
+        choices=["any", "german", "english"], required=False
+    )
     useSavedPreferences = serializers.BooleanField(required=False, default=True)
 
     def to_criteria(self) -> dict:
@@ -37,6 +40,7 @@ class SearchCriteriaSerializer(serializers.Serializer):
             "employment_types": _clean(data.get("employmentTypes", [])),
             "sources": _clean(data.get("sources", [])),
             "keywords": _clean(data.get("keywords", [])),
+            "language_filter": data.get("languageFilter") or "",
             "use_saved_preferences": data.get("useSavedPreferences", True),
         }
 

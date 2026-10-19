@@ -553,3 +553,45 @@ class RunnerRobustnessTests(APITestCase):
         }
         for job in jobs:
             self.assertIn(job.employment_type, allowed, f"{job.title} was {job.employment_type}")
+
+    def test_language_preference_is_applied_to_results(self):
+        """A German-only search must not save English postings.
+
+        The synthetic sample data is English, so filtering it for German tests
+        the filter rather than the data.
+        """
+
+        run = SearchRun.objects.create(
+            user=self.user,
+            criteria={
+                "roles": ["Werkstudent"],
+                "locations": ["Dortmund"],
+                "language_filter": "german",
+            },
+            sources=[],
+            stages=build_stages(),
+        )
+        run = run_sync(run)
+
+        jobs = Job.objects.filter(user=self.user)
+        self.assertTrue(all(job.language == "german" for job in jobs))
+
+        extract = next(stage for stage in run.stages if stage["key"] == "extract")
+        self.assertIn("set aside for language", extract["detail"])
+
+    def test_any_language_saves_everything(self):
+        run = SearchRun.objects.create(
+            user=self.user,
+            criteria={
+                "roles": ["Werkstudent"],
+                "locations": ["Dortmund"],
+                "language_filter": "any",
+            },
+            sources=[],
+            stages=build_stages(),
+        )
+        run = run_sync(run)
+
+        self.assertTrue(Job.objects.filter(user=self.user).exists())
+        extract = next(stage for stage in run.stages if stage["key"] == "extract")
+        self.assertNotIn("set aside for language", extract["detail"])

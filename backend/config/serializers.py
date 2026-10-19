@@ -18,6 +18,15 @@ class DetailSerializer(serializers.Serializer):
     )
 
 
+class LanguageCountsSerializer(serializers.Serializer):
+    """Per-language tallies for the job list's language tabs."""
+
+    any = serializers.IntegerField(help_text="Every job, including unknown languages.")
+    german = serializers.IntegerField()
+    english = serializers.IntegerField()
+    unknown = serializers.IntegerField()
+
+
 class CountsSerializer(serializers.Serializer):
     """Status tallies used by the My Jobs tabs."""
 
@@ -25,6 +34,7 @@ class CountsSerializer(serializers.Serializer):
     reviewed = serializers.IntegerField()
     saved = serializers.IntegerField()
     dismissed = serializers.IntegerField()
+    languages = LanguageCountsSerializer()
 
 
 class LogoutSerializer(serializers.Serializer):

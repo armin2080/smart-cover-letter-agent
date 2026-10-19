@@ -718,6 +718,30 @@ class PreferencesTests(APITestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
+    def test_language_preference_defaults_to_any(self):
+        """Narrowing to one language costs results, so it must be opt-in.
+
+        The boards searched are overwhelmingly German; silently defaulting to
+        German-only would hide English postings a user never asked to exclude.
+        """
+
+        response = self.client.get(reverse("profile-preferences"))
+        self.assertEqual(response.data["languageFilter"], "any")
+
+    def test_language_preference_can_be_set_and_read_back(self):
+        for value in ("german", "english", "any"):
+            response = self.client.patch(
+                reverse("profile-preferences"), {"languageFilter": value}, format="json"
+            )
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+            self.assertEqual(response.data["languageFilter"], value)
+
+    def test_rejects_an_unknown_language_preference(self):
+        response = self.client.patch(
+            reverse("profile-preferences"), {"languageFilter": "klingon"}, format="json"
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
 
 class NotificationTests(APITestCase):
     def setUp(self):

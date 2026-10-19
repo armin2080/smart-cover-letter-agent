@@ -159,8 +159,30 @@ class JobApiTests(APITestCase):
     def test_counts(self):
         response = self.client.get(reverse("job-counts"))
         self.assertEqual(
-            response.data, {"new": 1, "reviewed": 1, "saved": 1, "dismissed": 1}
+            {key: response.data[key] for key in ("new", "reviewed", "saved", "dismissed")},
+            {"new": 1, "reviewed": 1, "saved": 1, "dismissed": 1},
         )
+
+    def test_counts_include_language_tallies_for_the_tabs(self):
+        """The language tabs need their own totals.
+
+        `any` is the total rather than the sum of the parts: a posting whose
+        language could not be determined still belongs in the full list but has
+        no tab of its own.
+        """
+
+        make_job(self.user, fingerprint="de-1", language="german")
+        make_job(self.user, fingerprint="en-1", language="english")
+        # Everything created in setUp defaults to "unknown".
+
+        response = self.client.get(reverse("job-counts"))
+        languages = response.data["languages"]
+
+        self.assertEqual(languages["german"], 1)
+        self.assertEqual(languages["english"], 1)
+        self.assertEqual(languages["unknown"], 4)
+        self.assertEqual(languages["any"], 6)
+        self.assertEqual(languages["any"], sum(languages[key] for key in ("german", "english", "unknown")))
 
     # -- detail ----------------------------------------------------------- #
 
@@ -252,6 +274,24 @@ class JobApiTests(APITestCase):
         self.client.force_authenticate(None)
         for url in (reverse("job-list"), reverse("job-counts"), reverse("job-stats")):
             self.assertEqual(self.client.get(url).status_code, status.HTTP_401_UNAUTHORIZED)
+
+    # -- language filter --------------------------------------------------- #
+
+    def test_language_filter_narrows_to_one_language(self):
+        make_job(self.user, fingerprint="de-1", title="Werkstudent Entwicklung", language="german")
+        make_job(self.user, fingerprint="en-1", title="Working Student Developer", language="english")
+
+        response = self.client.get(reverse("job-list"), {"language": "german"})
+        titles = [row["title"] for row in response.data["results"]]
+
+        self.assertIn("Werkstudent Entwicklung", titles)
+        self.assertNotIn("Working Student Developer", titles)
+
+    def test_the_any_language_filter_filters_nothing(self):
+        """Undetermined languages belong in the full list."""
+
+        response = self.client.get(reverse("job-list"), {"language": "any"})
+        self.assertEqual(response.data["count"], 4)
 
 
 class MatchingEngineTests(APITestCase):

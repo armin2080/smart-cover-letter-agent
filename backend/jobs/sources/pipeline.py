@@ -59,10 +59,18 @@ class PipelineResult:
     #: user's roles but omits its employment type is exactly the one worth
     #: telling them about — a count alone leaves them unable to judge.
     untyped_withheld_jobs: list[DeduplicatedJob] = field(default_factory=list)
+    #: Listings set aside because they are not in the requested language. Kept
+    #: as groups for the same reason, and separated from `untyped_withheld_jobs`
+    #: so the run can say which filter removed them.
+    language_withheld_jobs: list[DeduplicatedJob] = field(default_factory=list)
 
     @property
     def untyped_withheld(self) -> int:
         return len(self.untyped_withheld_jobs)
+
+    @property
+    def language_withheld(self) -> int:
+        return len(self.language_withheld_jobs)
 
     @property
     def warnings(self) -> list[str]:
@@ -288,6 +296,13 @@ def split_by_employment_filter(
 
     from jobs.sources.base import STUDENT_EMPLOYMENT_TYPES, EmploymentType
 
+    # No preference means no filtering. Without this guard `wanted` is empty,
+    # so every typed listing failed `job_type in wanted` and was dropped while
+    # every untyped one was withheld — a search with no employment filter
+    # returned nothing at all, which reads as "the boards had no jobs".
+    if not employment_types:
+        return jobs, []
+
     wanted = set(employment_types)
     if EmploymentType.WORKING_STUDENT in wanted:
         wanted |= STUDENT_EMPLOYMENT_TYPES
@@ -308,6 +323,40 @@ def split_by_employment_filter(
         # the request. No evidence, or a reading outside the filter, means the
         # listing does not belong in a filtered result.
         if candidates and candidates <= wanted:
+            kept.append(group)
+        else:
+            withheld.append(group)
+
+    return kept, withheld
+
+
+def split_by_language_filter(
+    jobs: list[DeduplicatedJob], language_filter: str
+) -> tuple[list[DeduplicatedJob], list[DeduplicatedJob]]:
+    """Apply the language preference and return `(kept, withheld)`.
+
+    A specific language excludes postings whose language could not be
+    determined. That is the deliberate choice: keeping them would show a
+    German-only reader adverts that may well be in English, confidently and
+    without any indication. Withholding them means the run can say how many
+    were set aside, and switching to "any language" brings them back.
+    """
+
+    from jobs.sources.language import LanguageFilter, matches_language_filter
+
+    try:
+        wanted = LanguageFilter(language_filter or LanguageFilter.ANY)
+    except ValueError:
+        wanted = LanguageFilter.ANY
+
+    if wanted is LanguageFilter.ANY:
+        return jobs, []
+
+    kept: list[DeduplicatedJob] = []
+    withheld: list[DeduplicatedJob] = []
+
+    for group in jobs:
+        if matches_language_filter(group.primary.language, wanted):
             kept.append(group)
         else:
             withheld.append(group)
@@ -337,6 +386,9 @@ def run_pipeline(
     if apply_filter:
         result.jobs, result.untyped_withheld_jobs = split_by_employment_filter(
             result.jobs, request.employment_types
+        )
+        result.jobs, result.language_withheld_jobs = split_by_language_filter(
+            result.jobs, request.language_filter
         )
 
     if request.posted_within_days:

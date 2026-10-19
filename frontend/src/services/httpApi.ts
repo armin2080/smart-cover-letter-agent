@@ -11,6 +11,7 @@ import type {
   CoverLetterRequest,
   CvDocument,
   Job,
+  JobCounts,
   JobDetail,
   JobFilters,
   JobStats,
@@ -146,12 +147,13 @@ export const httpApi: ApiSurface = {
           match: filters.match,
           company: filters.company,
           ordering: filters.ordering,
+          language: filters.language,
         },
         signal: opts?.signal,
       })
     },
     counts(opts?: RequestOpts) {
-      return apiClient.get<Record<string, number>>("/jobs/counts/", { signal: opts?.signal })
+      return apiClient.get<JobCounts>("/jobs/counts/", { signal: opts?.signal })
     },
     get(id: number, opts?: RequestOpts) {
       return apiClient.get<JobDetail>(`/jobs/${id}/`, { signal: opts?.signal })

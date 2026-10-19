@@ -222,6 +222,11 @@ class PreferencesSerializer(serializers.ModelSerializer):
     )
     sources = serializers.ListField(child=serializers.CharField(max_length=64))
     keywords = serializers.ListField(child=serializers.CharField(max_length=120))
+    languageFilter = serializers.ChoiceField(
+        choices=[choice.value for choice in Preferences.LanguageFilter],
+        source="language_filter",
+        required=False,
+    )
 
     class Meta:
         model = Preferences
@@ -232,6 +237,7 @@ class PreferencesSerializer(serializers.ModelSerializer):
             "employmentTypes",
             "sources",
             "keywords",
+            "languageFilter",
         )
 
     def _clean_list(self, values: list[str]) -> list[str]:

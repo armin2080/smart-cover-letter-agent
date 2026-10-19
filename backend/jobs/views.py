@@ -63,6 +63,12 @@ class JobListView(APIView):
         if employment_type:
             queryset = queryset.filter(employment_type=employment_type)
 
+        # The language tabs. "Any" must not filter at all: postings whose
+        # language could not be determined still belong in the full list.
+        language = request.query_params.get("language")
+        if language and language != "any":
+            queryset = queryset.filter(language=language)
+
         match = request.query_params.get("match")
         if match:
             queryset = queryset.filter(match=match)
@@ -140,12 +146,25 @@ class JobCountsView(APIView):
             row["status"]: row["total"]
             for row in user_jobs(request.user).values("status").annotate(total=Count("id"))
         }
+        languages = {
+            row["language"]: row["total"]
+            for row in user_jobs(request.user).values("language").annotate(total=Count("id"))
+        }
         return Response(
             {
                 "new": counts.get(Job.Status.NEW, 0),
                 "reviewed": counts.get(Job.Status.REVIEWED, 0),
                 "saved": counts.get(Job.Status.SAVED, 0),
                 "dismissed": counts.get(Job.Status.DISMISSED, 0),
+                # Tallies for the language tabs. `any` is the total rather than
+                # the sum of the others, because "unknown" belongs to the full
+                # list but has no tab of its own.
+                "languages": {
+                    "any": sum(languages.values()),
+                    "german": languages.get("german", 0),
+                    "english": languages.get("english", 0),
+                    "unknown": languages.get("unknown", 0),
+                },
             }
         )
 

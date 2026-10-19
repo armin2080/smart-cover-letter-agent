@@ -157,6 +157,11 @@ class CvDocument(models.Model):
 class Preferences(models.Model):
     """Job-search preferences — deliberately separate from CV qualifications."""
 
+    class LanguageFilter(models.TextChoices):
+        ANY = "any", "Any language"
+        GERMAN = "german", "German"
+        ENGLISH = "english", "English"
+
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="preferences")
     desired_roles = models.JSONField(default=list, blank=True)
     locations = models.JSONField(default=list, blank=True)
@@ -164,6 +169,12 @@ class Preferences(models.Model):
     employment_types = models.JSONField(default=list, blank=True)
     sources = models.JSONField(default=list, blank=True)
     keywords = models.JSONField(default=list, blank=True)
+    #: Which postings to keep, by the language they are written in. "any" by
+    #: default: the boards are German, so narrowing costs results and should be
+    #: something the user opts into rather than a surprise.
+    language_filter = models.CharField(
+        max_length=16, choices=LanguageFilter.choices, default=LanguageFilter.ANY
+    )
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self) -> str:
@@ -207,6 +218,7 @@ def ensure_user_defaults(user: User) -> None:
             "employment_types": ["full-time"],
             "sources": list(DEFAULT_SOURCES),
             "keywords": [],
+            "language_filter": Preferences.LanguageFilter.ANY,
         },
     )
     NotificationSettings.objects.get_or_create(user=user)

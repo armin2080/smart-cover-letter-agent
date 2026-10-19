@@ -1,4 +1,4 @@
-import { EMPLOYMENT_OPTIONS, SOURCE_OPTIONS } from "../../lib/labels"
+import { EMPLOYMENT_OPTIONS, LANGUAGE_FILTER_OPTIONS, SOURCE_OPTIONS } from "../../lib/labels"
 import { TagInput } from "../ui/TagInput"
 import type { Preferences } from "../../types"
 
@@ -93,6 +93,28 @@ export function PreferencesForm({ value, onChange, disabled = false }: Preferenc
             </label>
           ))}
         </div>
+      </div>
+
+      <div className="field">
+        <span>Posting language</span>
+        <div className="check-grid">
+          {LANGUAGE_FILTER_OPTIONS.map((option) => (
+            <label className="check-item" key={option.value}>
+              <input
+                type="radio"
+                name="language-filter"
+                checked={value.languageFilter === option.value}
+                disabled={disabled}
+                onChange={() => patch({ languageFilter: option.value })}
+              />
+              <span>{option.label}</span>
+            </label>
+          ))}
+        </div>
+        <small className="hint">
+          Many postings on German boards are written in German. Choosing one language hides the others, and
+          listings whose language could not be determined.
+        </small>
       </div>
 
       <label className="field">

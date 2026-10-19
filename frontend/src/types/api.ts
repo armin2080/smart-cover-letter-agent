@@ -172,6 +172,32 @@ export interface JobFilters {
   match?: MatchLevel
   company?: string
   ordering?: "newest" | "oldest" | "match"
+  /** Which postings to show, by the language they are written in. */
+  language?: LanguageFilter
+}
+
+/** Which postings to keep, by the language they are written in.
+ *
+ *  "any" is a preference; "unknown" is not. A user may want every language, but
+ *  nobody wants to filter *for* adverts whose language could not be determined —
+ *  those appear only in the full list. */
+export type LanguageFilter = "any" | "german" | "english"
+
+/** Per-language tallies behind the job list's language tabs. `any` is the total,
+ *  not the sum of the others: undetermined postings appear here alone. */
+export interface LanguageCounts {
+  any: number
+  german: number
+  english: number
+  unknown: number
+}
+
+export interface JobCounts {
+  new: number
+  reviewed: number
+  saved: number
+  dismissed: number
+  languages: LanguageCounts
 }
 
 export interface StatCard {
@@ -251,6 +277,7 @@ export interface Preferences {
   employmentTypes: EmploymentType[]
   sources: string[]
   keywords: string[]
+  languageFilter: LanguageFilter
 }
 
 /* -------------------------------------------------------------------------- */
@@ -275,6 +302,7 @@ export interface SearchCriteria {
   employmentTypes: EmploymentType[]
   sources: string[]
   keywords: string[]
+  languageFilter: LanguageFilter
   useSavedPreferences: boolean
 }
 

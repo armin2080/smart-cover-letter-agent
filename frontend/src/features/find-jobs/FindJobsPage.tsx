@@ -22,6 +22,7 @@ function toPreferences(criteria: SearchCriteria): Preferences {
     employmentTypes: criteria.employmentTypes,
     sources: criteria.sources,
     keywords: criteria.keywords,
+    languageFilter: criteria.languageFilter,
   }
 }
 
@@ -33,6 +34,7 @@ function fromPreferences(preferences: Preferences, useSavedPreferences: boolean)
     employmentTypes: preferences.employmentTypes,
     sources: preferences.sources,
     keywords: preferences.keywords,
+    languageFilter: preferences.languageFilter,
     useSavedPreferences,
   }
 }
@@ -44,6 +46,7 @@ const EMPTY_CRITERIA: SearchCriteria = {
   employmentTypes: [],
   sources: [],
   keywords: [],
+  languageFilter: "any",
   useSavedPreferences: true,
 }
 

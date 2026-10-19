@@ -83,6 +83,10 @@ interface JobSeed {
   status: JobDetail["status"]
   skills: string[]
   hasCoverLetter: boolean
+  /** Language the advert is written in, for the language tabs. Seed copy is
+   *  English, so that is the default; a few German postings show the tabs
+   *  doing something. */
+  language?: NonNullable<JobDetail["language"]>
   summary: string
   responsibilities: string[]
   requirements: string[]
@@ -102,6 +106,7 @@ const JOB_SEEDS: JobSeed[] = [
     status: "new",
     skills: ["Figma", "Design systems", "Research"],
     hasCoverLetter: true,
+    language: "english",
     summary:
       "Shape thoughtful digital products used by ambitious teams across Europe, working closely with product, engineering and research.",
     responsibilities: [
@@ -130,6 +135,7 @@ const JOB_SEEDS: JobSeed[] = [
     status: "saved",
     skills: ["Product strategy", "Prototyping", "SaaS"],
     hasCoverLetter: false,
+    language: "german",
     summary:
       "Own the experience of a fast-growing B2B platform and help define how teams collaborate across Europe.",
     responsibilities: [
@@ -153,6 +159,7 @@ const JOB_SEEDS: JobSeed[] = [
     hours: 48,
     source: "Stellenwerk",
     match: "good",
+    language: "german",
     status: "new",
     skills: ["UI design", "Workshops", "Agile"],
     hasCoverLetter: false,
@@ -198,6 +205,7 @@ const JOB_SEEDS: JobSeed[] = [
   },
   {
     id: 5,
+    language: "german",
     title: "Product Designer — Growth",
     company: "Ledgerly",
     location: "Remote · EU",
@@ -248,6 +256,7 @@ const JOB_SEEDS: JobSeed[] = [
   },
   {
     id: 7,
+    language: "german",
     title: "UX Researcher",
     company: "Cobalt Analytics",
     location: "Remote · Germany",
@@ -343,6 +352,7 @@ export const SEED_JOBS: JobDetail[] = JOB_SEEDS.map((seed) => ({
   status: seed.status,
   skills: seed.skills,
   hasCoverLetter: seed.hasCoverLetter,
+  language: seed.language ?? "english",
   summary: seed.summary,
   responsibilities: seed.responsibilities,
   requirements: seed.requirements,
@@ -437,6 +447,7 @@ export const SEED_PREFERENCES: Preferences = {
   employmentTypes: ["full-time"],
   sources: ["LinkedIn", "StepStone", "Stellenwerk"],
   keywords: ["SaaS", "design systems", "B2B"],
+  languageFilter: "any",
 }
 
 export const SEED_COVER_LETTER: CoverLetter = {

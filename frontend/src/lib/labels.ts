@@ -1,4 +1,4 @@
-import type { EmploymentType, JobStatus, MatchLevel } from "../types/api"
+import type { EmploymentType, JobStatus, LanguageFilter, MatchLevel } from "../types/api"
 
 /** Qualitative match labels — deliberately never a percentage. */
 export function matchLabel(level: MatchLevel): string {
@@ -46,6 +46,23 @@ export const EMPLOYMENT_OPTIONS: Array<{ value: EmploymentType; label: string }>
 ]
 
 export const SOURCE_OPTIONS = ["LinkedIn", "StepStone", "Stellenwerk"]
+
+/**
+ * Language preference. "Any language" is first and is the default: the boards
+ * searched are overwhelmingly German, so narrowing is a choice, not a given.
+ */
+export const LANGUAGE_FILTER_OPTIONS: Array<{ value: LanguageFilter; label: string }> = [
+  { value: "any", label: "Any language" },
+  { value: "german", label: "German only" },
+  { value: "english", label: "English only" },
+]
+
+/** Labels for the language tabs on the job list. */
+export const LANGUAGE_TABS: Array<{ value: LanguageFilter; label: string }> = [
+  { value: "any", label: "All languages" },
+  { value: "german", label: "German" },
+  { value: "english", label: "English" },
+]
 
 export const MATCH_OPTIONS: Array<{ value: MatchLevel; label: string }> = [
   { value: "strong", label: "Strong match" },

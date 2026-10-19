@@ -60,8 +60,14 @@ class SearchRunListCreateView(APIView):
                 criteria["employment_types"] = list(preferences.employment_types or [])
             if not criteria["keywords"]:
                 criteria["keywords"] = list(preferences.keywords or [])
+            if not criteria["language_filter"]:
+                criteria["language_filter"] = preferences.language_filter or "any"
             if not criteria["sources"]:
                 criteria["sources"] = list(preferences.sources or [])
+
+        # A search must always be explicit about language, because the pipeline
+        # reads the value directly and "" is not a preference.
+        criteria["language_filter"] = criteria["language_filter"] or "any"
 
         sources = criteria["sources"] or ["LinkedIn", "StepStone", "Stellenwerk"]
 

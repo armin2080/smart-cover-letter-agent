@@ -248,6 +248,10 @@ class SearchRequest:
     posted_within_days: int | None = None
     work_models: list[WorkModel] = field(default_factory=list)
     max_results: int = 50
+    #: Which postings to keep, by the language they are written in. The value
+    #: is one of `jobs.sources.language.LanguageFilter`; anything unrecognised
+    #: means "no preference" rather than "hide everything".
+    language_filter: str = "any"
 
     def summary(self) -> str:
         parts: list[str] = []

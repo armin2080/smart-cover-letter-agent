@@ -1057,6 +1057,93 @@ class EmploymentFilterTests(TestCase):
         groups = [self._group(EmploymentType.FULL_TIME)]
         self.assertEqual(len(apply_employment_filter(groups, [])), 1)
 
+    def test_an_empty_filter_keeps_everything_in_the_split_too(self):
+        """Regression: an empty filter dropped every listing.
+
+        `split_by_employment_filter` had no empty-list guard, so with no
+        preference selected `wanted` was empty and nothing survived — typed
+        listings failed the membership test and untyped ones were withheld.
+        `apply_employment_filter` guarded this, but the pipeline calls the
+        split directly, so a search with no employment filter returned nothing.
+        """
+
+        from jobs.sources.pipeline import split_by_employment_filter
+
+        groups = [
+            self._group(EmploymentType.FULL_TIME),
+            self._group(EmploymentType.WORKING_STUDENT),
+            self._group(EmploymentType.UNKNOWN),
+        ]
+        kept, withheld = split_by_employment_filter(groups, [])
+        self.assertEqual(len(kept), 3)
+        self.assertEqual(withheld, [])
+
+
+class LanguageFilterTests(TestCase):
+    """A language preference narrows the results to postings in that language.
+
+    Someone who does not read German should be able to say so once instead of
+    opening adverts one at a time to find out.
+    """
+
+    def _group(self, language: str) -> DeduplicatedJob:
+        return DeduplicatedJob(
+            primary=NormalizedJob(
+                source="Test",
+                source_url=f"https://example.invalid/{language}",
+                title="Job",
+                company="Acme",
+                language=language,
+            )
+        )
+
+    def test_any_keeps_every_language(self):
+        from jobs.sources.pipeline import split_by_language_filter
+
+        groups = [self._group("german"), self._group("english"), self._group("unknown")]
+        kept, withheld = split_by_language_filter(groups, "any")
+        self.assertEqual(len(kept), 3)
+        self.assertEqual(withheld, [])
+
+    def test_german_keeps_only_german_postings(self):
+        from jobs.sources.pipeline import split_by_language_filter
+
+        groups = [self._group("german"), self._group("english"), self._group("unknown")]
+        kept, withheld = split_by_language_filter(groups, "german")
+        self.assertEqual([group.primary.language for group in kept], ["german"])
+        self.assertEqual(len(withheld), 2)
+
+    def test_english_keeps_only_english_postings(self):
+        from jobs.sources.pipeline import split_by_language_filter
+
+        groups = [self._group("german"), self._group("english")]
+        kept, _ = split_by_language_filter(groups, "english")
+        self.assertEqual([group.primary.language for group in kept], ["english"])
+
+    def test_undetermined_language_is_withheld_not_guessed(self):
+        """Keeping it would show a German-only reader adverts that may be English.
+
+        Withholding is visible — the run reports how many were set aside — and
+        reversible by switching back to "any language".
+        """
+
+        from jobs.sources.pipeline import split_by_language_filter
+
+        groups = [self._group("unknown")]
+        kept, withheld = split_by_language_filter(groups, "german")
+        self.assertEqual(kept, [])
+        self.assertEqual(len(withheld), 1)
+
+    def test_an_unrecognised_preference_does_not_hide_everything(self):
+        """Failing open keeps a bad value from looking like a broken search."""
+
+        from jobs.sources.pipeline import split_by_language_filter
+
+        groups = [self._group("german"), self._group("english")]
+        kept, withheld = split_by_language_filter(groups, "klingon")
+        self.assertEqual(len(kept), 2)
+        self.assertEqual(withheld, [])
+
 
 # --------------------------------------------------------------------------- #
 # Response encoding                                                           #

@@ -7,6 +7,7 @@ import type {
   CoverLetterRequest,
   CvDocument,
   Job,
+  JobCounts,
   JobDetail,
   JobFilters,
   JobStats,
@@ -60,7 +61,7 @@ export interface ApiSurface {
 
   jobs: {
     list(filters: JobFilters, opts?: RequestOpts): Promise<Paginated<Job>>
-    counts(opts?: RequestOpts): Promise<Record<string, number>>
+    counts(opts?: RequestOpts): Promise<JobCounts>
     get(id: number, opts?: RequestOpts): Promise<JobDetail>
     updateStatus(id: number, status: Job["status"]): Promise<Job>
     stats(opts?: RequestOpts): Promise<JobStats>
